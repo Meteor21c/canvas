@@ -164,3 +164,29 @@ test("private, relative and credential-protected upload URLs never reach the ima
         assert.equal(calls.some((call) => call.url.endsWith("/images/edits")), false);
     }
 });
+
+test("Seedream edits bypass channel JSON public-URL mode and send inline data URLs to generations", async () => {
+    const { api, config, channel, calls } = fixture({ token: "session", mode: "local" });
+    config.model = config.imageModel = "seedream5";
+    channel.models = ["seedream5"];
+    const result = await api.requestEdit(config, "调整光线", [{ ...reference, dataUrl: inlineImage }]);
+    assert.equal(result[0].dataUrl, inlineImage);
+    assert.equal(calls[0].url, "/api/v1/images/generations");
+    assert.equal(calls[0].headers["Content-Type"], "application/json");
+    const body = JSON.parse(calls[0].body);
+    assert.equal(body.model, "seedream5");
+    assert.equal(body.prompt, "调整光线");
+    assert.deepEqual(body.image, [inlineImage]);
+});
+
+test("remote Canvas Seedream tasks keep the generations JSON request shape", async () => {
+    const { api, config, channel, calls } = fixture({ token: "session", mode: "remote" });
+    config.model = config.imageModel = "seedream5";
+    channel.models = ["seedream5"];
+    await api.createCanvasImageTask(config, "调整光线", [{ ...reference, dataUrl: inlineImage }], { nodeId: "node-seedream" });
+    assert.equal(calls[0].url, "/api/v1/canvas/image-tasks");
+    const task = JSON.parse(calls[0].body);
+    assert.equal(task.endpoint, "/images/generations");
+    assert.equal(task.nodeId, "node-seedream");
+    assert.deepEqual(task.request.image, [inlineImage]);
+});

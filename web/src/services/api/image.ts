@@ -176,6 +176,10 @@ function isGrokImageModel(model: string) {
     return model.trim().toLowerCase().startsWith("grok-imagine-image");
 }
 
+function isSeedreamImageModel(model: string) {
+    return model.trim().toLowerCase().includes("seedream");
+}
+
 function isGrok2APIImageConfig(config: AiConfig) {
     return channelProtocolForConfig(config) === "grok2api" && isGrokImageModel(config.model);
 }
@@ -740,6 +744,17 @@ async function createGrokImageEditBody(config: AiConfig, prompt: string, referen
     return body;
 }
 
+async function createSeedreamImageEditBody(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams) {
+    const body: Record<string, unknown> = {
+        model: config.model,
+        prompt: withPromptGuard(config, withSystemPrompt(config, prompt)),
+        image: await Promise.all(references.map(imageToDataUrl)),
+    };
+    applyImageGenerationParams(body, config, params, "edit");
+    applyImageGenerationOptions(body, config, params);
+    return body;
+}
+
 async function requestGrokImageEditSingle(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams): Promise<GeneratedImage[]> {
     const mime = IMAGE_MIME;
     const body = await createGrokImageEditBody(config, prompt, references, params);
@@ -771,6 +786,7 @@ async function requestGrokImageEditSingle(config: AiConfig, prompt: string, refe
 }
 
 function usesJSONImageEdits(config: AiConfig) {
+    if (isSeedreamImageModel(config.model)) return false;
     const channel = config.channelMode === "remote"
         ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config)) || config.publicChannels[0]
         : localChannelForActiveModel(config);
@@ -810,6 +826,35 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     if (isGrok2APIImageConfig(config)) return requestGrokImageEditSingle(config, prompt, references, params);
 
     const mime = IMAGE_MIME;
+    if (isSeedreamImageModel(config.model)) {
+        const body = await createSeedreamImageEditBody(config, prompt, references, params);
+        const directProvider = !usesAccountProxy(config) ? directAIProviderForConfig(config) : null;
+        if (directProvider) {
+            const { requestDirectImages } = await import("@/services/api/direct-ai");
+            return parseImagePayload(await requestDirectImages(config, directProvider, "/images/generations", body, params.timeoutSeconds), mime);
+        }
+        return requestAndParseImages(
+            config,
+            "/images/generations",
+            body,
+            params.timeoutSeconds,
+            () => requestWithTransientRetry(() => withTimeout(params.timeoutSeconds, (signal) => fetch(aiApiUrl(config, "/images/generations"), {
+                method: "POST",
+                headers: aiHeaders(config, "application/json"),
+                body: JSON.stringify(body),
+                signal,
+            }))),
+            async (response) => {
+                if (config.streamImages && isEventStreamResponse(response)) {
+                    const images = await parseImagesStreamResponse(response, mime);
+                    return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
+                }
+                const payload = await response.json() as ImageApiResponse;
+                return { images: parseImagePayload(payload, mime), responseBody: stringifyLogPayload(payload) };
+            },
+        );
+    }
+
     const formData = new FormData();
     formData.set("model", config.model);
     formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
@@ -1127,6 +1172,14 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
             extra_body: { image: imageUrls },
         };
         applyAgnesImageSize(body, config, params);
+        return {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ endpoint: "/images/generations", ...meta, request: body }),
+        };
+    }
+    if (references.length && isSeedreamImageModel(config.model)) {
+        const body = await createSeedreamImageEditBody(config, prompt, references, params);
         return {
             method: "POST",
             headers: jsonHeaders,
