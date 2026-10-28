@@ -93,6 +93,12 @@ func CreateCanvasImageTask(w http.ResponseWriter, r *http.Request) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
+	if service.MeteorEnabled() {
+		if err := validateMeteorAIRequest(body, contentType, endpoint, channel, true); err != nil {
+			FailWithStatus(w, 400, err.Error())
+			return
+		}
+	}
 	task, err := service.CreateCanvasImageTask(service.CanvasImageTaskCreateInput{
 		UserID:          user.ID,
 		UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),

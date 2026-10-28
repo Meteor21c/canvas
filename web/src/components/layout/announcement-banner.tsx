@@ -5,10 +5,16 @@ import { Carousel, type GetRef } from "antd";
 import { Megaphone, X } from "lucide-react";
 
 const ANNOUNCEMENTS = [
-    <><Megaphone />流星 API 创作画布 · 站主试用中，生成沿用本站账户余额与计费规则</>,
-    <><Megaphone />图片和视频缓存保留 24 小时，请及时下载或导出保存</>,
+    <>
+        <Megaphone />
+        画布自最近编辑起保留 7 天，图片与视频保留 7 天
+    </>,
+    <>
+        <Megaphone />
+        请经常导出画布，将重要作品与素材备份到本地
+    </>,
 ];
-const DISMISSED_KEY = "meteor-canvas:v082:announcement-dismissed";
+const DISMISSED_KEY = "meteor-canvas:seven-day:announcement-dismissed";
 
 export function AnnouncementBanner() {
     const [visible, setVisible] = useState(false);
@@ -29,7 +35,7 @@ export function AnnouncementBanner() {
     return (
         <section
             aria-label="站点公告"
-            className="relative min-h-12 w-full shrink-0 bg-sky-100 text-foreground dark:bg-neutral-700"
+            className="relative min-h-9 w-full shrink-0 border-b border-stone-200/70 bg-stone-100 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
             onFocus={() => setPaused(true)}
@@ -41,15 +47,17 @@ export function AnnouncementBanner() {
                 autoplaySpeed={5000}
                 effect="fade"
                 speed={0}
-                beforeChange={(_, next) => setSlide((current) => current.index === next ? current : { index: next, direction: "right" })}
+                beforeChange={(_, next) => setSlide((current) => (current.index === next ? current : { index: next, direction: "right" }))}
                 adaptiveHeight
                 dots={false}
                 rootClassName="isolate"
             >
                 {ANNOUNCEMENTS.map((content, index) => (
                     <div key={index}>
-                        <div className={`flex min-h-12 items-center justify-center gap-2 px-12 py-2 text-center text-sm duration-300 in-[.slick-active]:animate-in in-[.slick-active]:fade-in sm:text-base ${slide.direction === "left" ? "in-[.slick-active]:slide-in-from-left-2" : "in-[.slick-active]:slide-in-from-right-2"}`}>
-                            <span className="min-w-0 break-words font-medium leading-[1.6] [&_a]:whitespace-nowrap [&_svg]:mr-2 [&_svg]:inline-block [&_svg]:size-[18px] [&_svg]:align-middle [&_svg]:-translate-y-[2.5px]">{content}</span>
+                        <div
+                            className={`flex min-h-9 items-center justify-center gap-2 px-12 py-2 text-center text-xs duration-300 in-[.slick-active]:animate-in in-[.slick-active]:fade-in ${slide.direction === "left" ? "in-[.slick-active]:slide-in-from-left-2" : "in-[.slick-active]:slide-in-from-right-2"}`}
+                        >
+                            <span className="min-w-0 break-words leading-[1.6] [&_a]:whitespace-nowrap [&_svg]:mr-2 [&_svg]:inline-block [&_svg]:size-3.5 [&_svg]:align-middle [&_svg]:-translate-y-px">{content}</span>
                         </div>
                     </div>
                 ))}

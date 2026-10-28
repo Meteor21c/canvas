@@ -116,7 +116,7 @@ const IMAGE_MIME = "image/png";
 const IMAGE_REQUEST_TIMEOUT_SECONDS = 600;
 const PROMPT_REWRITE_GUARD_PREFIX = "Use the following text as the complete prompt. Do not rewrite it:";
 
-function normalizeQuality(quality: string) {
+export function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
     if (!value || value === "auto") return "auto";
     const normalized = QUALITY_ALIASES[value] || value;
@@ -156,7 +156,7 @@ function resolveSize(quality: string, ratio: string): string | undefined {
     return `${(w / a) * unit}x${(h / a) * unit}`;
 }
 
-function resolveRequestSize(quality: string | undefined, size: string) {
+export function resolveRequestSize(quality: string | undefined, size: string) {
     const value = size.trim();
     if (!value || value === "auto") return undefined;
     if (/^\d+x\d+$/.test(value)) return value;
@@ -169,7 +169,7 @@ function createImageRequestParams(config: AiConfig): ImageRequestParams {
     const zhipu = isZhipuImageModel(config.model);
     const quality = zhipu ? normalizeZhipuImageQuality(config.model, normalizedQuality) : normalizedQuality;
     return {
-        n: normalizeBoundedInteger(config.count, 1, 1, 15),
+        n: normalizeBoundedInteger(config.count, 1, 1, 4),
         quality,
         size: resolveRequestSize(quality, config.size),
         timeoutSeconds: IMAGE_REQUEST_TIMEOUT_SECONDS,
@@ -955,6 +955,8 @@ async function requestAndParseImages(config: AiConfig, endpoint: string, request
 }
 
 async function requestImages(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], signal?: AbortSignal): Promise<GeneratedImage[]> {
+    assertCustomerImageLimits(config, references);
+    config = { ...config, apiMode: "images", codexCli: "" };
 	const translation = await findParameterTranslation(config);
 	if (translation) {
 		const input = await imageTranslationInput(config,prompt,references,createImageRequestParams(config));
@@ -1035,6 +1037,8 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
 }
 
 export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}): Promise<CanvasImageTask> {
+    assertCustomerImageLimits(config, references);
+    config = { ...config, apiMode: "images", codexCli: "" };
 	const translation = await findParameterTranslation(config);
     if (!usesAccountProxy(config)) {
         const images = await requestImages({ ...config, count: "1" }, prompt, references, options.signal);
@@ -1596,4 +1600,10 @@ export async function deleteCanvasImageTask(config: AiConfig, task?: CanvasImage
     }
     const payload = (await response.json()) as { code?: number; msg?: string };
     if (payload.code !== 0) throw new ImageRequestError(payload.msg || "删除图片任务失败", payload);
+}
+
+function assertCustomerImageLimits(config: AiConfig & { seedCount?: number }, references: ReferenceImage[]) {
+    if (references.length > 4) throw new ImageRequestError("参考图最多 4 张，请移除多余图片后重试");
+    const count = Number(config.count || 1), batch = config.seedCount ?? count;
+    if (!Number.isInteger(count) || count < 1 || count > 4 || !Number.isInteger(batch) || batch < 1 || batch > 4) throw new ImageRequestError("每次最多生成 4 张图片");
 }

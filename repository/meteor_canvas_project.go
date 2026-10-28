@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tigerowo/infinite-canvas/model"
 	"gorm.io/gorm"
@@ -12,6 +13,95 @@ import (
 
 var ErrMeteorProjectConflict = errors.New("画布已被其他页面更新或删除，请重新打开后再编辑")
 var meteorProjectMu sync.Mutex
+
+const MeteorProjectRetention = 7 * 24 * time.Hour
+
+func MeteorProjectExpired(project model.CanvasProject, at time.Time) bool {
+	if !meteorProjectHasRetention(project) {
+		return false
+	}
+	updated, err := time.Parse(time.RFC3339Nano, project.UpdatedAt)
+	return err != nil || !at.Before(updated.Add(MeteorProjectRetention))
+}
+
+func meteorProjectHasRetention(project model.CanvasProject) bool {
+	var data struct {
+		Version int `json:"retentionVersion"`
+	}
+	return json.Unmarshal([]byte(project.ProjectData), &data) == nil && data.Version == 1
+}
+
+func initializeMeteorProjectRetention(tx *gorm.DB, project model.CanvasProject, at time.Time) (model.CanvasProject, error) {
+	if project.DeletedAt != "" || meteorProjectHasRetention(project) {
+		return project, nil
+	}
+	var data map[string]any
+	if json.Unmarshal([]byte(project.ProjectData), &data) != nil {
+		return project, errors.New("旧画布数据无效，未执行清理")
+	}
+	project.UpdatedAt = at.UTC().Format(time.RFC3339Nano)
+	data["updatedAt"], data["retentionVersion"] = project.UpdatedAt, 1
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return project, err
+	}
+	project.ProjectData = string(raw)
+	err = tx.Model(&model.CanvasProject{}).Where("user_id = ? AND id = ? AND deleted_at = ''", project.UserID, project.ID).Updates(map[string]any{"project_data": project.ProjectData, "updated_at": project.UpdatedAt}).Error
+	return project, err
+}
+
+// Existing projects receive a full first seven-day window on adoption. Their
+// former client timestamps are not evidence of a server-side retention date.
+func PrepareMeteorCanvasProjectRetention(userID string, at time.Time) error {
+	meteorProjectMu.Lock()
+	defer meteorProjectMu.Unlock()
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	var projects []model.CanvasProject
+	if err := db.Where("user_id = ? AND deleted_at = ''", userID).Find(&projects).Error; err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, project := range projects {
+			if _, err := initializeMeteorProjectRetention(tx, project, at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Expire bodies one row at a time while retaining the small ID tombstone. The
+// same mutex as saves prevents expiring a concurrently refreshed project.
+func ExpireMeteorCanvasProjects(at time.Time) error {
+	meteorProjectMu.Lock()
+	defer meteorProjectMu.Unlock()
+	db, err := DB()
+	if err != nil {
+		return err
+	}
+	var projects []model.CanvasProject
+	if err := db.Where("deleted_at = '' AND updated_at < ?", at.Add(-MeteorProjectRetention).UTC().Format(time.RFC3339Nano)).Limit(100).Find(&projects).Error; err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if !meteorProjectHasRetention(project) {
+			if _, err := initializeMeteorProjectRetention(db, project, at); err != nil {
+				return err
+			}
+			continue
+		}
+		if !MeteorProjectExpired(project, at) {
+			continue
+		}
+		if err := db.Model(&model.CanvasProject{}).Where("user_id = ? AND id = ? AND updated_at = ? AND deleted_at = ''", project.UserID, project.ID, project.UpdatedAt).Updates(map[string]any{"project_data": "", "deleted_at": at.UTC().Format(time.RFC3339Nano)}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func meteorProjectRevision(raw string) int64 {
 	var value struct {
@@ -37,7 +127,12 @@ func SaveMeteorCanvasProjects(userID string, projects []model.CanvasProject, ins
 			return err
 		}
 		byID := map[string]model.CanvasProject{}
-		for _, p := range existing {
+		for i, p := range existing {
+			p, err = initializeMeteorProjectRetention(tx, p, time.Now())
+			if err != nil {
+				return err
+			}
+			existing[i] = p
 			byID[p.ID] = p
 		}
 		for _, p := range projects {
@@ -47,7 +142,7 @@ func SaveMeteorCanvasProjects(userID string, projects []model.CanvasProject, ins
 				continue
 			}
 			revision := meteorProjectRevision(p.ProjectData)
-			if exists && (current.DeletedAt != "" || revision != meteorProjectRevision(current.ProjectData)) {
+			if exists && (current.DeletedAt != "" || MeteorProjectExpired(current, time.Now()) || revision != meteorProjectRevision(current.ProjectData)) {
 				return ErrMeteorProjectConflict
 			}
 			if !exists && !insertOnly && revision != 0 {
@@ -63,6 +158,16 @@ func SaveMeteorCanvasProjects(userID string, projects []model.CanvasProject, ins
 			} else if revision < 1 {
 				data["revision"] = 1
 			}
+			// Clients cannot extend retention by supplying a future timestamp.
+			p.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			if !exists {
+				p.CreatedAt = p.UpdatedAt
+			}
+			data["createdAt"], data["updatedAt"] = p.CreatedAt, p.UpdatedAt
+			data["retentionVersion"] = 1
+			delete(data, "expiresAt")
+			delete(data, "retentionDays")
+			delete(data, "expiryWarning")
 			raw, err := json.Marshal(data)
 			if err != nil {
 				return err

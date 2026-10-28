@@ -58,7 +58,14 @@ func canvasProjectData(
 ) []json.RawMessage {
 	result := make([]json.RawMessage, 0, len(projects))
 	for _, project := range projects {
+		if MeteorEnabled() && repository.MeteorProjectExpired(project, time.Now()) {
+			continue
+		}
 		if strings.TrimSpace(project.ProjectData) != "" {
+			if MeteorEnabled() {
+				result = append(result, meteorProjectPayload(project))
+				continue
+			}
 			result = append(
 				result,
 				json.RawMessage(project.ProjectData),
@@ -68,12 +75,31 @@ func canvasProjectData(
 	return result
 }
 
+func meteorProjectPayload(project model.CanvasProject) json.RawMessage {
+	var data map[string]any
+	if json.Unmarshal([]byte(project.ProjectData), &data) != nil {
+		return json.RawMessage(`{}`)
+	}
+	expires := MeteorExpiry(project.UpdatedAt)
+	data["updatedAt"], data["createdAt"] = project.UpdatedAt, project.CreatedAt
+	data["expiresAt"], data["retentionDays"] = expires, 7
+	expiry, _ := time.Parse(time.RFC3339Nano, expires)
+	data["expiryWarning"] = time.Until(expiry) <= 24*time.Hour
+	raw, _ := json.Marshal(data)
+	return raw
+}
+
 func CurrentUserCanvasProjects(
 	ctx context.Context,
 ) ([]json.RawMessage, error) {
 	user, ok := UserFromContext(ctx)
 	if !ok || user.ID == "" {
 		return nil, errors.New("请先登录")
+	}
+	if MeteorEnabled() {
+		if err := repository.PrepareMeteorCanvasProjectRetention(user.ID, time.Now()); err != nil {
+			return nil, err
+		}
 	}
 
 	projects, err := repository.ListUserCanvasProjects(user.ID)
@@ -103,7 +129,7 @@ func SaveCurrentUserCanvasProject(
 		}
 		for _, value := range saved {
 			if value.ID == project.ID {
-				return json.RawMessage(value.ProjectData), nil
+				return meteorProjectPayload(value), nil
 			}
 		}
 		return nil, ErrMeteorProjectConflict

@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { Cpu } from "lucide-react";
+import { ModelPricePopover } from "@/components/pricing/model-price-popover";
+import type { PricingKind } from "@/types/meteor-pricing";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { useAutoDLWorkflowNames } from "@/hooks/use-autodl-workflow";
@@ -119,13 +121,14 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
                 align="start"
                 side="bottom"
                 sideOffset={6}
+                onPointerDownOutside={(event) => { if ((event.target as HTMLElement)?.closest?.("[data-model-price-popup]")) event.preventDefault(); }}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 {options.length ? (
                     options.map((option) => (
                         <SelectItem key={option.key} value={option.key} textValue={`${"workflowRef" in option ? option.label : modelLabel(option.model, option)} ${option.model} ${option.channelName}`}>
-                            <ModelLabel model={"workflowRef" in option ? option.workflowRef.workflowId : option.model} label={"workflowRef" in option ? `工作流 · ${option.label}` : modelLabel(option.model, option)} channelName={option.channelName} />
+                            <ModelLabel model={"workflowRef" in option ? option.workflowRef.workflowId : option.model} label={"workflowRef" in option ? `工作流 · ${option.label}` : modelLabel(option.model, option)} channelName={option.channelName} price={"workflowRef" in option ? undefined : { config, model: option.model, channelId: option.channelId, kind: pricingKind(config, option, capability) }} />
                         </SelectItem>
                     ))
                 ) : (
@@ -138,12 +141,18 @@ export function ModelPicker({ config, value, channelId, capability, onChange, wo
     );
 }
 
-function ModelLabel({ model, label, channelName }: { model: string; label?: string; channelName?: string }) {
+function pricingKind(config: AiConfig, option: PickerOption, capability?: ModelCapability): PricingKind | undefined {
+    const kind = capability || config.publicChannels.find(channel => channel.id === option.channelId)?.modelCapabilities?.[option.model];
+    return kind === "image" || kind === "video" ? kind : undefined;
+}
+
+function ModelLabel({ model, label, channelName, price }: { model: string; label?: string; channelName?: string; price?: { config: AiConfig; model: string; channelId?: string; kind?: PricingKind } }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="truncate" title={model}>{label || model}</span>
             {channelName ? <span className="ml-auto max-w-24 shrink-0 truncate text-xs opacity-50">{channelName}</span> : null}
+            {price ? <ModelPricePopover {...price} /> : null}
         </span>
     );
 }

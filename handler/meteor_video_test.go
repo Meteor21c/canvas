@@ -36,7 +36,9 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 		case "/api/v1/keys":
 			io.WriteString(w, `{"code":0,"data":{"total":1,"items":[{"id":7,"user_id":88333,"group_id":8,"name":"Own key","status":"active","key":"fake-key-never-public"}]}}`)
 		case "/v1/models":
-			io.WriteString(w, `{"data":[{"id":"doubao-seedance-2.0-mini"},{"id":"gpt-image-2"}]}`)
+			io.WriteString(w, `{"data":[{"id":"doubao-seedance-2.5"},{"id":"gpt-image-2"}]}`)
+		case "/v1/videos/pricing":
+			io.WriteString(w, `{"model":"doubao-seedance-2.5","resolutions":["1080p"],"scenarios":[{"resolutions":["1080p"],"audio":true,"input_video":true,"billing_mode":"token","currency":"CNY","sale_per_million":2}]}`)
 		case "/v1/videos/generations":
 			if r.Method != "POST" {
 				t.Error("wrong method")
@@ -80,7 +82,7 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 		t.Fatal("public catalogue exposed gateway secrets")
 	}
 	id := "client_video_task_ci_" + uuid.NewString()
-	body := []byte(`{"model":"doubao-seedance-2.0-mini","prompt":"no actual generation","seconds":"30","resolution_name":"4K","size":"16:9","input_reference[]":[{"url":"https://owned.example/image.png"}],"reference_videos":["https://owned.example/reference.mp4"],"reference_audios":["https://owned.example/reference.mp3"],"first_frame_url":"https://owned.example/start.png","last_frame_url":"https://owned.example/end.png","audio":true}`)
+	body := []byte(`{"model":"doubao-seedance-2.5","prompt":"no actual generation","seconds":"30","resolution_name":"1080p","size":"16:9","reference_videos":["https://owned.example/reference.mp4"],"reference_audios":["https://owned.example/reference.mp3"],"first_frame_url":"https://owned.example/start.png","last_frame_url":"https://owned.example/end.png","audio":true}`)
 	call := func() string {
 		r := httptest.NewRequest("POST", "/api/v1/videos", bytes.NewReader(body))
 		r = r.WithContext(service.WithUser(r.Context(), user))
@@ -116,7 +118,7 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 	first := accepted["start_image_url"]
 	last := accepted["end_image_url"]
 	acceptedMu.Unlock()
-	if duration != float64(30) || resolution != "4K" || first != "https://owned.example/start.png" || last != "https://owned.example/end.png" || (!strings.Contains(fmt.Sprint(refs), "video:https://owned.example/reference.mp4") || !strings.Contains(fmt.Sprint(refs), "audio:https://owned.example/reference.mp3")) {
+	if duration != float64(30) || resolution != "1080p" || first != "https://owned.example/start.png" || last != "https://owned.example/end.png" || (!strings.Contains(fmt.Sprint(refs), "video:https://owned.example/reference.mp4") || !strings.Contains(fmt.Sprint(refs), "audio:https://owned.example/reference.mp3")) {
 		t.Fatalf("protocol silently changed capabilities: %+v", accepted)
 	}
 	task, found, err := service.GetUserVideoTask(user.ID, id)

@@ -529,14 +529,7 @@ export function AppConfigModal() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-4">
                         <Form.Item label="画布默认生图张数" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。" className="mb-4">
-                            <Input
-                                type="number"
-                                min={1}
-                                max={15}
-                                value={config.canvasImageCount}
-                                onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
-                                onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
-                            />
+                            <Select value={normalizeImageCount(config.canvasImageCount)} options={[1, 2, 3, 4].map((value) => ({ value: String(value), label: `${value} 张` }))} onChange={(value) => updateConfig("canvasImageCount", value)} />
                         </Form.Item>
                         {geminiTts ? (
                             <Form.Item label="默认 Gemini 音色" className="mb-4">
@@ -727,7 +720,7 @@ function channelIdForLocalModel(channels: LocalModelChannel[], model: string, cu
 }
 
 function normalizeImageCount(value: string) {
-    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
+    return String(Math.max(1, Math.min(4, Math.floor(Math.abs(Number(value)) || 3))));
 }
 
 

@@ -65,9 +65,11 @@ func TestMeteorStorageQuotaSignaturesRangesAndTTL(t *testing.T) {
 	if err := db.Model(&model.StorageObject{}).Where("id = ?", object.ID).Update("created_at", expired).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := meteorDownload(object.ID, ""); err == nil {
-		t.Fatal("expired inactive media retained")
+	recent, err := meteorDownload(object.ID, "")
+	if err != nil {
+		t.Fatal("media within seven days removed", err)
 	}
+	_ = recent.Stream.Close()
 	task := model.VideoTask{ID: "ci-active-" + uuid.NewString(), UserID: user.ID, Status: "processing", RequestBody: object.ID, CreatedAt: expired}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
@@ -152,5 +154,69 @@ func TestMeteorCanvasProjectRevisionsAndImports(t *testing.T) {
 		if MeteorValidateMetadata([]byte(bad)) == nil {
 			t.Fatal("accepted credential/inline metadata")
 		}
+	}
+}
+
+func TestMeteorSevenDayRetentionUsesServerTimeAndProtectsLegacyProjects(t *testing.T) {
+	previous := config.Cfg
+	config.Cfg = config.Config{MeteorMode: true, StorageDriver: "sqlite", DatabaseDSN: filepath.Join(t.TempDir(), "retention.db")}
+	t.Cleanup(func() { config.Cfg = previous })
+	user := model.AuthUser{ID: "retention-owner-" + uuid.NewString()}
+	ctx := WithUser(context.Background(), user)
+	db, err := repository.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := model.CanvasProject{UserID: user.ID, ID: "legacy", CreatedAt: "2000-01-01T00:00:00Z", UpdatedAt: "2000-01-01T00:00:00Z", ProjectData: `{"id":"legacy","name":"old work","revision":3,"createdAt":"2000-01-01T00:00:00Z","updatedAt":"2000-01-01T00:00:00Z","nodes":[{"id":"keep"}]}`}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A scheduled pass adopts old projects, preserving body and starting a
+	// fresh server-side seven-day window rather than treating old dates as TTL.
+	if err := repository.ExpireMeteorCanvasProjects(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := CurrentUserCanvasProjects(ctx)
+	if err != nil || len(projects) != 1 || !strings.Contains(string(projects[0]), `"id":"keep"`) {
+		t.Fatal("legacy body lost", projects, err)
+	}
+	var saved map[string]any
+	_ = json.Unmarshal(projects[0], &saved)
+	updated, _ := time.Parse(time.RFC3339Nano, saved["updatedAt"].(string))
+	expires, _ := time.Parse(time.RFC3339Nano, saved["expiresAt"].(string))
+	if time.Since(updated) > time.Minute || expires.Sub(updated) != 7*24*time.Hour || saved["expiryWarning"] != false {
+		t.Fatal("legacy retention not initialized from server time", saved)
+	}
+	// A future client timestamp cannot extend the retention clock.
+	saved["updatedAt"] = "2099-01-01T00:00:00Z"
+	raw, _ := json.Marshal(saved)
+	result, err := SaveCurrentUserCanvasProject(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal(result, &saved)
+	updated, _ = time.Parse(time.RFC3339Nano, saved["updatedAt"].(string))
+	if time.Since(updated) > time.Minute || updated.After(time.Now().Add(time.Minute)) {
+		t.Fatal("client controls retention", saved)
+	}
+	// Expire only this fixture, retaining the durable tombstone so stale sync
+	// cannot recreate a paid workflow or restore an expired body.
+	aged := time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	if err := db.Model(&model.CanvasProject{}).Where("user_id = ? AND id = ?", user.ID, "legacy").Update("updated_at", aged).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SaveCurrentUserCanvasProject(ctx, result); !errors.Is(err, ErrMeteorProjectConflict) {
+		t.Fatal("expired project refreshed by stale client", err)
+	}
+	if err := repository.ExpireMeteorCanvasProjects(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var tombstone model.CanvasProject
+	if err := db.First(&tombstone, "user_id = ? AND id = ?", user.ID, "legacy").Error; err != nil || tombstone.DeletedAt == "" || tombstone.ProjectData != "" {
+		t.Fatal("expiry lost tombstone or retained full body", tombstone, err)
+	}
+	projects, err = SyncCurrentUserCanvasProjects(ctx, []json.RawMessage{result})
+	if err != nil || len(projects) != 0 {
+		t.Fatal("sync resurrected expired project", err)
 	}
 }

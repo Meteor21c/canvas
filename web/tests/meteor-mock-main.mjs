@@ -9,7 +9,13 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/health") { res.end("ok"); return; }
     if (url.pathname === "/v1/models") {
         if (auth !== `Bearer ${key}`) return send(res, null, 401);
-        return sendRaw(res, { object: "list", data: [{ id: "gpt-image-2" }, { id: "gpt-5.5" }, { id: "grok-imagine-video" }] });
+        return sendRaw(res, { object: "list", data: [{ id: "gpt-image-2" }, { id: "gpt-5.5" }, { id: "doubao-seedance-2.0-mini" }] });
+    }
+    if (url.pathname === "/v1/videos/pricing") {
+        if (auth !== `Bearer ${key}`) return send(res, null, 401);
+        const scenario = { resolutions: ["480p", "720p"], audio: false, input_video: false, billing_mode: "token", currency: "CNY", sale_per_million: "41.791", official_per_million: "46", sale_rate_to_official: "0.9085" };
+        if (url.searchParams.get("catalog") === "true") return sendRaw(res, { model: "doubao-seedance-2.0-mini", resolutions: ["480p", "720p"], scenarios: [scenario] });
+        return sendRaw(res, { ...scenario, precharge_amount: "0.25" });
     }
     if (!owner && !outsider) return send(res, null, 401);
     if (url.pathname === "/api/v1/auth/me") return send(res, { id: owner ? 1 : 2, email: owner ? "owner@example.invalid" : "outsider@example.invalid", role: owner ? "admin" : "user", status: "active", balance: 100, created_at: "2026-10-28T00:00:00Z" });
@@ -17,6 +23,7 @@ const server = http.createServer((req, res) => {
     if (url.pathname === "/api/v1/keys") return send(res, { total: 1, items: [{ id: 7, user_id: 1, group_id: 2, status: "active", name: "CI test key", key, quota: 100, quota_used: 0 }] });
     if (url.pathname === "/api/v1/groups/available") return send(res, [{ id: 2, name: "CI images", platform: "openai", status: "active", allow_image_generation: true, allow_video_generation: true, rate_multiplier: 1, image_price_1k: 0.1, image_price_2k: 0.2, image_price_4k: 0.4 }]);
     if (url.pathname === "/api/v1/groups/rates") return send(res, { "2": 1 });
+    if (url.pathname === "/api/v1/model-plaza") return send(res, { groups: [{ id: 2, rate_multiplier: 0.5, user_rate_multiplier: null, models: [{ name: "gpt-image-2", pricing: { billing_mode: "image", per_request_price: 0.2, intervals: [{ tier_label: "1K", per_request_price: 0.2 }, { tier_label: "2K", per_request_price: 0.4 }, { tier_label: "4K", per_request_price: 0.8 }] }, official_pricing: { billing_mode: "image", per_request_price: 0.2 } }] }] });
     return send(res, null, 404);
 });
 function sendRaw(res, data) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); }

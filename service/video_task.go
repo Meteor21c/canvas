@@ -192,6 +192,10 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 		result["video_url"] = task.VideoURL
 		result["data"] = []map[string]any{{"url": task.VideoURL}}
 	}
+	if MeteorEnabled() && task.CompletedAt != "" {
+		result["expiresAt"] = MeteorExpiry(task.CompletedAt)
+		result["retentionDays"] = 7
+	}
 	if task.WorkflowRef != "" {
 		result["workflowRef"] = task.WorkflowRef
 	}

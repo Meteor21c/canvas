@@ -119,7 +119,7 @@ export default function AssetLibraryPage() {
                 <div className="pb-8">
                     <div className="mx-auto max-w-5xl text-center">
                         <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">素材库</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">挑选团队素材，加入我的素材后继续编辑和使用。</p>
+                        <p className="mt-3 text-sm leading-7 text-stone-500 dark:text-stone-400">挑选灵感素材，加入收藏后继续创作。图片与视频保留 7 天，请及时导出到本地备份。</p>
                     </div>
                     <div className="mx-auto mt-8 w-full max-w-2xl">
                         <Input

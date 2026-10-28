@@ -69,17 +69,25 @@ func MeteorAuthorizeVideo(r *http.Request, id string) bool {
 func MeteorVideoForContent(r *http.Request, id string) (model.VideoTask, error) {
 	if user, ok := UserFromContext(r.Context()); ok {
 		task, found, err := repository.GetUserVideoTask(user.ID, id)
-		if err == nil && found {
+		if err == nil && found && !meteorVideoExpired(task) {
 			return task, nil
 		}
 	}
 	if MeteorAuthorizeVideo(r, id) {
 		task, found, err := repository.GetVideoTask(id)
-		if err == nil && found {
+		if err == nil && found && !meteorVideoExpired(task) {
 			return task, nil
 		}
 	}
 	return model.VideoTask{}, errors.New("视频不存在或访问链接已过期")
+}
+
+func meteorVideoExpired(task model.VideoTask) bool {
+	if task.CompletedAt == "" {
+		return false
+	}
+	expiry, err := time.Parse(time.RFC3339Nano, MeteorExpiry(task.CompletedAt))
+	return err != nil || !time.Now().Before(expiry)
 }
 
 func MeteorStoreGeneratedImage(ctx context.Context, value string) (UploadedStorageObject, error) {

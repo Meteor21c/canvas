@@ -2,6 +2,7 @@ package model
 
 // StorageObject 存储对象（S3/R2、WebDAV 共用文件索引）。
 type StorageObject struct {
+	ExpiresAt  string `json:"expiresAt,omitempty" gorm:"-"`
 	ID         string `json:"id" gorm:"primaryKey"`
 	ProviderID string `json:"providerId" gorm:"index"`
 	Bucket     string `json:"bucket"`

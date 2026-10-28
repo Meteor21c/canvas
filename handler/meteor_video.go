@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 	if json.Unmarshal(raw, &input) != nil {
 		return nil, errors.New("视频请求必须是JSON")
 	}
+	if err := meteorValidateValues(input, 1); err != nil {
+		return nil, err
+	}
 	out := map[string]any{}
 	for _, field := range []string{"model", "prompt", "duration", "resolution", "aspect_ratio", "mode", "audio", "reference_images", "start_image_url", "end_image_url"} {
 		if value, ok := input[field]; ok {
@@ -37,6 +41,20 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 		if duration, err := strconv.Atoi(value); err == nil {
 			out["duration"] = duration
 		}
+	}
+	if out["duration"] == nil {
+		out["duration"] = 5
+	}
+	duration, err := strconv.ParseFloat(toMeteorString(out["duration"]), 64)
+	if err != nil || duration != float64(int(duration)) {
+		return nil, errors.New("视频时长须为整数秒")
+	}
+	out["duration"] = int(duration)
+	if out["audio"] == nil {
+		out["audio"] = false
+	}
+	if _, ok := out["audio"].(bool); !ok {
+		return nil, errors.New("视频音频参数无效")
 	}
 	if out["resolution"] == nil {
 		out["resolution"] = firstNonEmpty(readStringPath(input, "resolution_name"), readStringPath(input, "quality"), readStringPath(input, "vquality"), "720p")
@@ -81,6 +99,9 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 	}
 	refs := []any{}
 	appendRefs := func(value any, prefix string) {
+		if single, ok := value.(string); ok {
+			value = []any{single}
+		}
 		if values, ok := value.([]any); ok {
 			for _, item := range values {
 				if entry, ok := item.(map[string]any); ok {
@@ -100,6 +121,11 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 	if len(refs) > 0 {
 		out["reference_images"] = refs
 	}
+	referenceCount := len(refs) + meteorReferenceCount(out["start_image_url"]) + meteorReferenceCount(out["end_image_url"])
+	if referenceCount > 4 {
+		return nil, errors.New("视频参考素材最多4个")
+	}
+	out["watermark"] = false
 
 	// Main gateway supplies the existing asset-library review and billing queue.
 	return json.Marshal(out)
@@ -136,6 +162,13 @@ func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
 	modelName := readStringPath(input, "model")
 	channel, err := service.MeteorSelectChannel(user.ID, modelName, r.Header.Get("X-Model-Channel-ID"))
 	if err != nil {
+		FailWithStatus(w, 400, err.Error())
+		return
+	}
+	duration, _ := strconv.Atoi(toMeteorString(input["duration"]))
+	audio, _ := input["audio"].(bool)
+	inputVideo := meteorVideoReference(input["reference_images"]) || meteorVideoReference(input["start_image_url"]) || meteorVideoReference(input["end_image_url"])
+	if err := service.ValidateMeteorVideo(r.Context(), user.ID, channel.ID, modelName, duration, readStringPath(input, "resolution"), audio, inputVideo); err != nil {
 		FailWithStatus(w, 400, err.Error())
 		return
 	}
@@ -204,6 +237,41 @@ func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
 	_, _ = repository.SaveVideoTask(task)
 	service.WakeVideoTaskPoller()
 	OK(w, service.VideoTaskResponse(task))
+}
+
+func meteorVideoReference(value any) bool {
+	if entries, ok := value.([]any); ok {
+		for _, entry := range entries {
+			if meteorVideoReference(entry) {
+				return true
+			}
+		}
+		return false
+	}
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return false
+	}
+	if prefix, rest, ok := strings.Cut(text, ":"); ok {
+		switch strings.ToLower(prefix) {
+		case "video":
+			return strings.TrimSpace(rest) != ""
+		case "image", "audio":
+			return false
+		case "reference", "start", "end":
+			text = strings.TrimSpace(rest)
+		}
+	}
+	parsed, err := url.Parse(text)
+	if err != nil {
+		return false
+	}
+	name := firstNonEmpty(parsed.Query().Get("name"), parsed.Query().Get("filename"), parsed.Path)
+	switch strings.ToLower(path.Ext(name)) {
+	case ".mp4", ".mov", ".webm", ".m4v":
+		return true
+	}
+	return false
 }
 
 func meteorPollVideo(ctx context.Context, task model.VideoTask) (service.VideoTaskPollUpdate, error) {

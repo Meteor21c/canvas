@@ -7,7 +7,7 @@
         "dev": "next dev --webpack -H 0.0.0.0 -p 3000",
         "build": "next build",
         "typecheck": "tsc --noEmit",
-        "test:meteor": "node --test tests/meteor-boundaries.test.mjs && bun test ./tests/meteor-proxy.test.ts ./tests/meteor-video.test.ts",
+        "test:meteor": "node --test tests/meteor-boundaries.test.mjs && bun test ./tests/meteor-proxy.test.ts ./tests/meteor-video.test.ts ./tests/meteor-pricing.test.tsx ./tests/meteor-image-limits.test.ts",
         "build:bridge": "bun ../canvas-agent/scripts/build-comfy-bridge.ts",
         "start": "next start",
         "format": "prettier --write .",

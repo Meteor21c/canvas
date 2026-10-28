@@ -26,7 +26,7 @@ import (
 const MeteorMaxFileBytes = 64 << 20
 const meteorMediaGlobalBytes = 2 << 30
 const meteorMediaOwnerBytes = 512 << 20
-const meteorMediaTTL = 24 * time.Hour
+const meteorMediaTTL = 7 * 24 * time.Hour
 const meteorMediaActiveMaxTTL = 7 * 24 * time.Hour
 const meteorMediaOwnerMaxFiles = 256
 
@@ -122,7 +122,7 @@ func meteorUpload(ctx context.Context, filename, contentType string, data []byte
 		_ = os.Remove(path)
 		return UploadedStorageObject{}, err
 	}
-	return UploadedStorageObject{ID: id, StorageKey: "server:" + id, URL: MeteorMediaURL(id), Bytes: object.Bytes, MimeType: mediaType}, nil
+	return UploadedStorageObject{ID: id, StorageKey: "server:" + id, URL: MeteorMediaURL(id), Bytes: object.Bytes, MimeType: mediaType, ExpiresAt: MeteorExpiry(object.CreatedAt)}, nil
 }
 
 type meteorSectionReadCloser struct {
@@ -225,9 +225,12 @@ func StartMeteorMaintenance() {
 		return
 	}
 	go func() {
-		for {
+		// Wait for the regular tick; deployment does not trigger an immediate
+		// cleanup pass, and the routine never removes idempotency receipts.
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
 			meteorMaintain()
-			time.Sleep(time.Minute)
 		}
 	}()
 }
@@ -237,6 +240,7 @@ func meteorMaintain() {
 	if err != nil {
 		return
 	}
+	_ = repository.ExpireMeteorCanvasProjects(time.Now())
 	_ = repository.DeleteFinishedVideoTasksBefore(time.Now().Add(-meteorMediaTTL).UTC().Format(time.RFC3339Nano))
 	_ = repository.DeleteFinishedCanvasImageTasksBefore(time.Now().Add(-meteorMediaTTL).UTC().Format(time.RFC3339Nano))
 	_ = repository.DeleteFinishedCanvasAudioTasksBefore(time.Now().Add(-meteorMediaTTL).UTC().Format(time.RFC3339Nano))
@@ -259,6 +263,15 @@ func meteorMaintain() {
 			_ = repository.DeleteStorageObjectRecord(object.ID)
 		}
 	}
+}
+
+// Expiry timestamps are derived from server-side durable dates.
+func MeteorExpiry(timestamp string) string {
+	value, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil {
+		return ""
+	}
+	return value.Add(meteorMediaTTL).UTC().Format(time.RFC3339Nano)
 }
 
 // Active generation references receive bounded grace, including after restart.

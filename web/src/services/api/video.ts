@@ -435,6 +435,7 @@ export async function createVideoRequestBody(config: AiConfig, model: string, pr
             aspect_ratio: normalizeSeedanceRatio(config.size),
             mode: config.videoMode,
             audio: boolConfig(config.videoGenerateAudio, false),
+            watermark: false,
             ...(references.length ? { reference_images: references } : {}),
             ...(firstFrame ? { start_image_url: firstFrame } : {}),
             ...(lastFrame ? { end_image_url: lastFrame } : {}),

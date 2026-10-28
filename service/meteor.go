@@ -23,12 +23,13 @@ import (
 var ErrMeteorSession = errors.New("请返回流星 API 重新登录后再继续，原任务不会自动重发")
 
 type meteorSession struct {
-	User       model.AuthUser
-	Token      string
-	VerifiedAt time.Time
-	ExpiresAt  time.Time
-	CatalogAt  time.Time
-	Channels   []model.ModelChannel
+	User          model.AuthUser
+	Token         string
+	VerifiedAt    time.Time
+	ExpiresAt     time.Time
+	CatalogAt     time.Time
+	Channels      []model.ModelChannel
+	ChannelGroups map[string]int64
 }
 
 var meteorSessions = struct {
@@ -138,6 +139,7 @@ func MeteorAuthenticate(ctx context.Context, token string) (model.AuthUser, erro
 	if previous := meteorSessions.byUser[id]; previous != nil {
 		session.Channels = previous.Channels
 		session.CatalogAt = previous.CatalogAt
+		session.ChannelGroups = previous.ChannelGroups
 	}
 	for oldKey, old := range meteorSessions.byToken {
 		if time.Now().After(old.ExpiresAt) {
@@ -162,17 +164,20 @@ type meteorKey struct {
 	QuotaUsed float64    `json:"quota_used"`
 }
 type meteorGroup struct {
-	ID              int64           `json:"id"`
-	Name            string          `json:"name"`
-	Platform        string          `json:"platform"`
-	AllowImage      bool            `json:"allow_image_generation"`
-	AllowVideo      bool            `json:"allow_video_generation"`
-	VideoEnabled    bool            `json:"video_enabled"`
-	VideoPrices     map[string]any  `json:"video_model_prices"`
-	VideoPrice480p  json.RawMessage `json:"video_price_480p"`
-	VideoPrice720p  json.RawMessage `json:"video_price_720p"`
-	VideoPrice1080p json.RawMessage `json:"video_price_1080p"`
-	VideoPrice4K    json.RawMessage `json:"video_price_4k"`
+	ID               int64           `json:"id"`
+	Name             string          `json:"name"`
+	Platform         string          `json:"platform"`
+	AllowImage       bool            `json:"allow_image_generation"`
+	AllowVideo       bool            `json:"allow_video_generation"`
+	VideoEnabled     bool            `json:"video_enabled"`
+	VideoPrices      map[string]any  `json:"video_model_prices"`
+	VideoPrice480p   json.RawMessage `json:"video_price_480p"`
+	VideoPrice720p   json.RawMessage `json:"video_price_720p"`
+	VideoPrice1080p  json.RawMessage `json:"video_price_1080p"`
+	VideoPrice4K     json.RawMessage `json:"video_price_4k"`
+	Rate             *float64        `json:"rate_multiplier"`
+	VideoIndependent bool            `json:"video_rate_independent"`
+	VideoRate        *float64        `json:"video_rate_multiplier"`
 }
 
 func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
@@ -205,6 +210,7 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 		return nil, err
 	}
 	channels := []model.ModelChannel{}
+	channelGroups := map[string]int64{}
 	for page := 1; page <= 10; page++ {
 		var keys struct {
 			Items []meteorKey `json:"items"`
@@ -268,6 +274,7 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 				for _, name := range names {
 					caps[name] = capability
 				}
+				channelGroups[id+suffix] = group.ID
 				channels = append(channels, model.ModelChannel{ID: id + suffix, Protocol: protocol, Name: name, BaseURL: base, APIKey: key.Key, Models: names, ModelCapabilities: caps, Weight: 1, Timeout: 600, Enabled: true})
 			}
 			makeChannel("", "openai", append(textModels, imageModels...), "")
@@ -284,14 +291,6 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 			}
 			makeChannel("-video", "sub2api", videoModels, "video")
 			makeChannel("-gemini", "gemini", geminiModels, "text")
-			if len(geminiModels) > 0 && group.AllowImage {
-				last := &channels[len(channels)-1]
-				for _, name := range geminiModels {
-					if strings.Contains(strings.ToLower(name), "image") || strings.Contains(strings.ToLower(name), "banana") {
-						last.ModelCapabilities[name] = "image"
-					}
-				}
-			}
 		}
 		if len(keys.Items) == 0 || page*100 >= keys.Total {
 			break
@@ -300,6 +299,7 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 	meteorSessions.Lock()
 	if current := meteorSessions.byUser[userID]; current != nil {
 		current.Channels = channels
+		current.ChannelGroups = channelGroups
 		current.CatalogAt = time.Now()
 	}
 	meteorSessions.Unlock()
@@ -378,6 +378,7 @@ func MeteorSettings(userID string) (model.PublicSetting, error) {
 	}
 	deny, allow := false, true
 	settings := model.PublicSetting{Auth: model.PublicAuthSetting{AllowRegister: &deny}, Storage: model.PublicStorageSetting{Mode: "server_sqlite_s3", AllowUserProvider: false, AllowUserGlobalProvider: true}, ModelChannel: model.PublicModelChannelSetting{Channels: channels, AllowCustomChannel: &deny, AllowUserRemoteChannel: &allow, ModelCosts: []model.ModelCost{}, AvailableModels: []string{}}}
+	settings.Storage.RetentionDays = 7
 	seen := map[string]bool{}
 	for _, channel := range channels {
 		for _, name := range channel.Models {

@@ -20,7 +20,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
-import { isKIEKlingV3Config, kieKlingOmniVariant } from "@/components/video-settings-panel";
+import { isKIEKlingV3Config, kieKlingOmniVariant, normalizeVideoResolutionValue } from "@/components/video-settings-panel";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -31,7 +31,8 @@ import { PANORAMA_IMAGE_SIZE, PANORAMA_NODE_SIZE, buildPanoramaPrompt, isCanvasI
 import { applyCameraPrompt } from "../utils/canvas-camera";
 import { GROUP_PADDING, findContainingGroupId, findGroupDropTarget, getNodeBounds, snapNodesIntoGroup } from "../utils/canvas-group";
 import { App, Button, Dropdown, Modal, Slider } from "antd";
-import { isCogVideoX3Model, modelKey, supportsVideoAudioGeneration, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
+import { fetchMeteorCapabilities } from "@/services/api/meteor-pricing";
 import { isMimoVoiceCloneModel } from "@/lib/mimo-tts";
 import { isAutoDLConfig } from "@/lib/autodl";
 import { isGlmTtsModel } from "@/lib/audio-generation";
@@ -3732,6 +3733,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
                 if (action.name === "get_generation_config") {
                     const videoModel = agentEffectiveConfig.videoModel || agentEffectiveConfig.model;
+                    const videoCapabilities = videoModel ? await fetchMeteorCapabilities({
+                        kind: "video", model: videoModel,
+                        channelId: agentEffectiveConfig.videoChannelId || agentEffectiveConfig.activeChannelId,
+                    }, useUserStore.getState().token || "").catch(() => null) : null;
                     const audioModel = agentEffectiveConfig.audioModel;
                     const audioConfig = { ...agentEffectiveConfig, model: audioModel, activeChannelId: agentEffectiveConfig.audioChannelId || agentEffectiveConfig.activeChannelId };
                     const grokTts = isGrok2APITtsConfig(audioConfig, audioModel);
@@ -3751,8 +3756,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         imageCount: 1,
                         videoSeconds: agentEffectiveConfig.videoSeconds,
                         videoGenerateAudio: agentEffectiveConfig.videoGenerateAudio,
-                        videoSupportsAudio: supportsVideoAudioGeneration(videoModel),
-                        videoDuration: canvasAgentVideoDurationHint(videoModel),
+                        videoSupportsAudio: videoCapabilities?.supportsAudio ?? videoCapabilities?.scenarios.some(scenario => scenario.audio) ?? false,
+                        videoDuration: videoCapabilities?.duration || null,
+                        videoResolutions: videoCapabilities?.resolutions || [],
                         audioVoice: isGeminiTtsModel(audioModel) && isGeminiConfig(audioConfig, audioModel) ? agentEffectiveConfig.geminiTtsVoice : isGlmTtsModel(audioModel) ? agentEffectiveConfig.glmTtsVoice : grokTts ? agentEffectiveConfig.grokTtsVoice : agentEffectiveConfig.audioVoice,
                         audioLanguage: grokTts ? agentEffectiveConfig.grokTtsLanguage : "",
                         audioFormat: isGlmTtsModel(audioModel) ? agentEffectiveConfig.glmTtsFormat : grokTts ? agentEffectiveConfig.grokTtsFormat : agentEffectiveConfig.audioFormat,
@@ -3968,16 +3974,29 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     };
                     if (mode === "image") {
                         metadata.quality = generationConfig.quality;
-                        metadata.count = typeof args.count === "number" ? Math.max(1, Math.floor(args.count)) : 1;
+                        const count = typeof args.count === "number" ? args.count : 1;
+                        if (!Number.isInteger(count) || count < 1 || count > 4) return { ok: false, code: "invalid_count", message: "每次只能生成 1–4 张图片" };
+                        if (sourceNodes.filter(node => isCanvasImageNodeType(node.type)).length > 4) return { ok: false, code: "too_many_references", message: "参考图片最多 4 张" };
+                        metadata.count = count;
                     }
                     if (mode === "video") {
                         metadata.vquality = generationConfig.vquality;
                         const seconds = typeof args.seconds === "number" ? args.seconds : Number(generationConfig.videoSeconds);
-                        const durationError = agentWorkflowRef ? "" : validateCanvasAgentVideoSeconds(generationConfig.model, seconds);
-                        if (durationError) return { ok: false, code: "unsupported_duration", message: durationError, supported: canvasAgentVideoDurationHint(generationConfig.model) };
+                        const capabilities = await fetchMeteorCapabilities({
+                            kind: "video", model: generationConfig.model,
+                            channelId: generationConfig.videoChannelId || generationConfig.activeChannelId,
+                        }, useUserStore.getState().token || "");
+                        const bounds = capabilities.duration;
+                        if (!capabilities.available || !bounds) return { ok: false, code: "model_unavailable", message: "当前视频模型暂不可用" };
+                        if (!Number.isInteger(seconds) || seconds < bounds.min || seconds > bounds.max || (bounds.values?.length && !bounds.values.includes(seconds))) {
+                            return { ok: false, code: "unsupported_duration", message: bounds.values?.length ? `可选时长：${bounds.values.join("、")} 秒` : `时长须为 ${bounds.min}–${bounds.max} 秒`, supported: bounds };
+                        }
+                        if (!capabilities.resolutions.some(value => normalizeVideoResolutionValue(value).toLowerCase() === normalizeVideoResolutionValue(generationConfig.vquality).toLowerCase())) {
+                            return { ok: false, code: "unsupported_resolution", message: "请选择当前模型支持的清晰度", supported: capabilities.resolutions };
+                        }
                         const generateAudio = typeof args.generateAudio === "boolean" ? args.generateAudio : generationConfig.videoGenerateAudio === "true";
-                        if (!agentWorkflowRef && generateAudio && !supportsVideoAudioGeneration(generationConfig.model)) {
-                            return { ok: false, code: "video_audio_not_supported", message: "当前全局视频模型不支持视频原生声音" };
+                        if (generateAudio && !(capabilities.supportsAudio ?? capabilities.scenarios.some(scenario => scenario.audio))) {
+                            return { ok: false, code: "video_audio_not_supported", message: "当前视频模型不支持原生声音" };
                         }
                         metadata.seconds = String(seconds);
                         metadata.generateAudio = String(generateAudio);
@@ -5212,6 +5231,8 @@ function CanvasTopBar({
         <>
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+                    <button type="button" onClick={onProjects} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}><Images className="size-3.5" /><span>我的画布</span></button>
+                    <button type="button" onClick={onHome} className="hidden h-9 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs sm:inline-flex" style={{ color: theme.node.text }}><Home className="size-3.5" /><span>首页</span></button>
                     <button type="button" onClick={onToggleSidePanel} className="grid size-7 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={sidePanelOpen ? "收起左侧面板" : "展开左侧面板"}>
                         {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
                     </button>
@@ -5517,7 +5538,7 @@ function syncAssistantReferences(sessions: CanvasAssistantSession[], nodes: Canv
 }
 
 function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+    return Math.max(1, Math.min(4, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
@@ -5979,36 +6000,6 @@ function canvasAgentTaskSummary(node: CanvasNodeData) {
     };
 }
 
-function canvasAgentVideoDurationHint(modelName: string) {
-    const key = modelKey(modelName);
-    if (isCogVideoX3Model(key)) return { values: [5, 10], range: "仅 5 或 10 秒" };
-    if (key.includes("seedance-2-5") || key.includes("seedance2-5")) return { min: 4, max: 30, auto: -1, range: "智能（-1）或 4-30 秒，范围内任意整数秒数均可；videoSeconds 仅为默认值，可由本次 seconds 覆盖" };
-    if (key.includes("seedance")) return { values: [-1, 4, 5, 6, 8, 10, 12, 15], range: "智能或 4-15 秒" };
-    if (isCanvasAgentKlingV3(key)) return { values: [3, 15], range: "3-15 秒" };
-    if (isCanvasAgentKlingV26(key)) return { values: [5, 10], range: "仅 5 或 10 秒" };
-    return { values: [6, 10, 12, 16, 20], range: "1-30 秒" };
-}
-
-function validateCanvasAgentVideoSeconds(modelName: string, seconds: number) {
-    if (!Number.isInteger(seconds)) return "视频总时长必须为整数秒";
-    const key = modelKey(modelName);
-    if (isCogVideoX3Model(key) && seconds !== 5 && seconds !== 10) return "当前 CogVideoX-3 模型仅支持 5 或 10 秒";
-    const seedanceMaxSeconds = (key.includes("seedance-2-5") || key.includes("seedance2-5")) ? 30 : 15;
-    if (key.includes("seedance") && seconds !== -1 && (seconds < 4 || seconds > seedanceMaxSeconds)) return `当前 Seedance 模型仅支持智能时长或 4-${seedanceMaxSeconds} 秒`;
-    if (isCanvasAgentKlingV3(key) && (seconds < 3 || seconds > 15)) return "当前 Kling 3 模型仅支持 3-15 秒";
-    if (isCanvasAgentKlingV26(key) && seconds !== 5 && seconds !== 10) return "当前 Kling 2.6 模型仅支持 5 或 10 秒";
-    if (!key.includes("seedance") && !key.includes("kling") && (seconds < 1 || seconds > 30)) return "当前视频模型仅支持 1-30 秒";
-    return "";
-}
-
-function isCanvasAgentKlingV3(key: string) {
-    return key.includes("kling-v3") || key.includes("kling-3-0");
-}
-
-function isCanvasAgentKlingV26(key: string) {
-    return key.includes("kling-v2-6") || key.includes("kling-2-6");
-}
-
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
     const channelId = node?.metadata?.channelId || "";
@@ -6035,7 +6026,8 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         videoShotType: node?.metadata?.shotType || config.videoShotType || defaultConfig.videoShotType,
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoCharacterOrientation: node?.metadata?.characterOrientation || config.videoCharacterOrientation || defaultConfig.videoCharacterOrientation,
-        videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
+        videoWatermark: "false",
+        apiMode: mode === "image" ? "images" : config.apiMode,
         audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
@@ -6051,7 +6043,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         mimoTtsFormat: node?.metadata?.mimoTtsFormat || config.mimoTtsFormat || defaultConfig.mimoTtsFormat,
         mimoVoiceDesignPrompt: node?.metadata?.mimoVoiceDesignPrompt || config.mimoVoiceDesignPrompt || defaultConfig.mimoVoiceDesignPrompt,
         geminiTtsVoice: node?.metadata?.geminiTtsVoice || config.geminiTtsVoice || defaultConfig.geminiTtsVoice,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        count: mode === "video" ? "1" : String(Math.max(1, Math.min(4, Math.floor(Number(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count)) || 1)))),
     };
 }
 

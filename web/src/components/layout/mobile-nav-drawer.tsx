@@ -1,6 +1,7 @@
 "use client";
 
 import { Drawer } from "antd";
+import { ReceiptText } from "lucide-react";
 import Link from "next/link";
 
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
@@ -14,7 +15,7 @@ type MobileNavDrawerProps = {
 
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     return (
-        <Drawer title="导航" placement="left" size={280} open={open} onClose={onClose} className="md:hidden">
+        <Drawer title="流星创作台" placement="left" size={280} open={open} onClose={onClose} className="xl:hidden">
             <div className="space-y-1">
                 {navigationTools.map((tool) => {
                     const Icon = tool.icon;
@@ -34,6 +35,15 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                         </Link>
                     );
                 })}
+                <div className="my-3 border-t border-stone-200 dark:border-stone-800" />
+                <Link
+                    href="/pricing"
+                    onClick={onClose}
+                    className="flex items-center gap-3 rounded-lg px-3 py-3 text-base text-stone-600 transition hover:bg-stone-100 hover:text-stone-950 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                >
+                    <ReceiptText className="size-5" />
+                    计价标准
+                </Link>
             </div>
         </Drawer>
     );

@@ -146,14 +146,14 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
             title: STRING,
             sourceNodeIds: STRING_ARRAY,
             size: STRING,
-            count: { type: "integer", minimum: 1, maximum: 15 },
+            count: { type: "integer", minimum: 1, maximum: 4 },
         },
         ["prompt", "sourceNodeIds"],
     ),
     defineTool(
         "edit_image",
         "创建图片编辑节点和来源连线，并按 Agent 自动生成设置决定是否提交现有图片编辑链路；必须提供至少一个真实图片来源节点，图片按 sourceNodeIds 顺序编号。",
-        { prompt: STRING, title: STRING, sourceNodeIds: STRING_ARRAY, size: STRING, count: { type: "integer", minimum: 1, maximum: 15 } },
+        { prompt: STRING, title: STRING, sourceNodeIds: STRING_ARRAY, size: STRING, count: { type: "integer", minimum: 1, maximum: 4 } },
         ["prompt", "sourceNodeIds"],
     ),
     defineTool(
@@ -165,7 +165,7 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
             title: STRING,
             sourceNodeIds: STRING_ARRAY,
             size: STRING,
-            seconds: { type: "integer", minimum: -1, maximum: 30, description: "本次视频任务的总时长（秒），不是每个内部镜头的时长。按 videoDuration 的合法范围或离散值填写已确认时长；仅省略时使用当前 videoSeconds 默认值，不得把默认值当成上限。-1 仅用于支持智能时长的模型。" },
+            seconds: { type: "integer", minimum: 1, description: "本次视频任务的总时长（秒），不是每个内部镜头的时长。按 videoDuration 的合法范围或离散值填写已确认时长；仅省略时使用当前 videoSeconds 默认值。" },
             generateAudio: { type: "boolean" },
         },
         ["prompt", "sourceNodeIds"],
@@ -287,14 +287,14 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
                 ...(sourceNodeIds ? { sourceNodeIds } : {}),
                 ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
                 ...(optionalString(input.size) ? { size: optionalString(input.size) } : {}),
-                ...(boundedInteger(input.count, 1, 15) ? { count: boundedInteger(input.count, 1, 15) } : {}),
+                ...(boundedInteger(input.count, 1, 4) ? { count: boundedInteger(input.count, 1, 4) } : {}),
             };
             if (actionName === "edit_image" && sourceNodeIds && !sourceNodeIds.length) throw new Error("edit_image 缺少图片来源节点");
             break;
         }
         case "generate_video": {
             const sourceNodeIds = optionalStringArray(input.sourceNodeIds, "sourceNodeIds");
-            const seconds = boundedInteger(input.seconds, -1, 30);
+            const seconds = boundedInteger(input.seconds, 1, Number.MAX_SAFE_INTEGER);
             if (input.model !== undefined) optionalString(input.model);
             if (input.generateAudio !== undefined && typeof input.generateAudio !== "boolean") throw new Error("generateAudio 必须是布尔值");
             normalized = {

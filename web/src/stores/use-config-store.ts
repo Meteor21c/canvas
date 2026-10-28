@@ -194,6 +194,7 @@ type ConfigStore = {
 };
 
 function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseRemoteChannel: boolean): AiConfig {
+    config = { ...config, apiMode: "images", count: clampImageCount(config.count), canvasImageCount: clampImageCount(config.canvasImageCount), videoWatermark: "false" };
     const channelMode = "remote" as const;
     void canUseRemoteChannel;
     if (!modelChannel) {
@@ -402,7 +403,7 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => ({
                     config: {
                         ...state.config,
-                        [key]: value,
+                        [key]: key === "apiMode" ? "images" : key === "count" || key === "canvasImageCount" ? clampImageCount(String(value)) : key === "videoWatermark" ? "false" : value,
                     },
                 }));
             },
@@ -473,9 +474,11 @@ export const useConfigStore = create<ConfigStore>()(
                         videoElementList: Array.isArray(config.videoElementList) && config.videoElementList.length ? config.videoElementList : defaultConfig.videoElementList,
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
-                        videoWatermark: config.videoWatermark || "false",
+                        videoWatermark: "false",
                         videoCharacterOrientation: config.videoCharacterOrientation === "image" ? "image" : "video",
-                        canvasImageCount: config.canvasImageCount || "1",
+                        count: clampImageCount(config.count),
+                        canvasImageCount: clampImageCount(config.canvasImageCount),
+                        apiMode: "images",
                         imageModels: filterChannelModelsByCapability(modelChannels, "image"),
                         videoModels: filterChannelModelsByCapability(modelChannels, "video"),
                         textModels: filterChannelModelsByCapability(modelChannels, "text"),
@@ -591,4 +594,8 @@ export type { DirectAIProvider } from "@/lib/model-channel";
 
 export function directAIProviderForConfig(config: AiConfig): DirectAIProvider | null {
     return directAIProviderForProtocol(channelProtocolForConfig(config));
+}
+
+function clampImageCount(value: string | undefined) {
+    return String(Math.max(1, Math.min(4, Math.floor(Number(value) || 1))));
 }

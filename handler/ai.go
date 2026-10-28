@@ -162,6 +162,12 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		failAIChannelSelect(w, err, "AI 接口请求失败")
 		return
 	}
+	if service.MeteorEnabled() {
+		if err := validateMeteorAIRequest(body, contentType, path, channel, false); err != nil {
+			FailWithStatus(w, 400, err.Error())
+			return
+		}
+	}
 	credits := 0.0
 	if userChannelID == "" {
 		credits, err = service.ModelCost(modelName)

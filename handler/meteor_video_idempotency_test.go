@@ -33,7 +33,10 @@ func TestMeteorVideoOnlyOnePostAfterConcurrencyAndResultCleanup(t *testing.T) {
 		case "/api/v1/keys":
 			data = map[string]any{"total": 1, "items": []map[string]any{{"id": 7, "user_id": 984721, "group_id": 2, "status": "active", "key": "ci-video-test-only"}}}
 		case "/v1/models":
-			data = []map[string]any{{"id": "seedance-2.0-mini"}}
+			data = []map[string]any{{"id": "doubao-seedance-2.0-mini"}}
+		case "/v1/videos/pricing":
+			_, _ = w.Write([]byte(`{"model":"doubao-seedance-2.0-mini","resolutions":["720p"],"scenarios":[{"resolutions":["720p"],"audio":false,"input_video":false,"billing_mode":"token","currency":"CNY","sale_per_million":2}]}`))
+			return
 		case "/v1/videos/generations":
 			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer ci-video-test-only" {
 				t.Error("incorrect method or gateway key")
@@ -62,7 +65,7 @@ func TestMeteorVideoOnlyOnePostAfterConcurrencyAndResultCleanup(t *testing.T) {
 	}
 	const id = "client_video_task_ci_one_unique_post"
 	call := func(user model.AuthUser) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, "/api/v1/videos", strings.NewReader(`{"model":"seedance-2.0-mini","prompt":"no paid network"}`))
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/videos", strings.NewReader(`{"model":"doubao-seedance-2.0-mini","prompt":"no paid network"}`))
 		r.Header.Set("X-Client-Video-Task-ID", id)
 		r.Header.Set("X-Model-Channel-ID", "meteor-key-7-video")
 		r = r.WithContext(service.WithUser(r.Context(), user))

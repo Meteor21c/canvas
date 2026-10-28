@@ -29,6 +29,7 @@ import (
 
 // UploadedStorageObject 上传存储对象返回结果。
 type UploadedStorageObject struct {
+	ExpiresAt  string `json:"expiresAt,omitempty"`
 	ID         string `json:"id"`
 	URL        string `json:"url"`
 	StorageKey string `json:"storageKey"`
@@ -98,7 +99,10 @@ func canUseGlobalStorage(ctx context.Context, storage model.PrivateStorageSettin
 
 // HasActiveCloudStorage 判断当前请求是否有可用的云存储。
 func HasActiveCloudStorage(ctx context.Context) (bool, error) {
-	if MeteorEnabled() { _,ok:=UserFromContext(ctx);return ok,nil }
+	if MeteorEnabled() {
+		_, ok := UserFromContext(ctx)
+		return ok, nil
+	}
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return false, err
@@ -126,7 +130,9 @@ func HasActiveCloudStorage(ctx context.Context) (bool, error) {
 
 // PublicStorageConfig 返回公开存储配置。
 func PublicStorageConfig() (model.PublicStorageConfig, error) {
-	if MeteorEnabled() {return model.PublicStorageConfig{PublicStorageSetting:model.PublicStorageSetting{Mode:"server_sqlite_s3",AllowUserGlobalProvider:true},AutoSyncAllAssets:true},nil}
+	if MeteorEnabled() {
+		return model.PublicStorageConfig{PublicStorageSetting: model.PublicStorageSetting{Mode: "server_sqlite_s3", AllowUserGlobalProvider: true}, AutoSyncAllAssets: true}, nil
+	}
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return model.PublicStorageConfig{}, err
@@ -146,7 +152,12 @@ func PublicStorageConfig() (model.PublicStorageConfig, error) {
 
 // StorageObjectInfo 获取存储对象元数据。
 func StorageObjectInfo(id string) (model.StorageObject, error) {
-	if MeteorEnabled() {object,err:=repository.GetStorageObject(id);object.PublicURL=MeteorMediaURL(id);return object,err}
+	if MeteorEnabled() {
+		object, err := repository.GetStorageObject(id)
+		object.PublicURL = MeteorMediaURL(id)
+		object.ExpiresAt = MeteorExpiry(object.CreatedAt)
+		return object, err
+	}
 	return repository.GetStorageObject(id)
 }
 
@@ -198,7 +209,12 @@ func UploadStorageObject(ctx context.Context, filename string, contentType strin
 
 // UploadStorageObjectWithProvider 上传对象到存储（可选用户自定义 Provider）。
 func UploadStorageObjectWithProvider(ctx context.Context, filename string, contentType string, data []byte, providerInput *StorageObjectProviderInput) (UploadedStorageObject, error) {
-	if MeteorEnabled() {if providerInput!=nil{return UploadedStorageObject{},errors.New("自定义对象存储暂不开放")};return meteorUpload(ctx,filename,contentType,data)}
+	if MeteorEnabled() {
+		if providerInput != nil {
+			return UploadedStorageObject{}, errors.New("自定义对象存储暂不开放")
+		}
+		return meteorUpload(ctx, filename, contentType, data)
+	}
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return UploadedStorageObject{}, err
@@ -302,7 +318,9 @@ func RegisterDirectStorageObject(ctx context.Context, input DirectStorageObjectI
 
 // DeleteStorageObject 删除存储对象。
 func DeleteStorageObject(ctx context.Context, id string, providerInput *StorageObjectProviderInput) error {
-	if MeteorEnabled() {return meteorDeleteObject(ctx,id)}
+	if MeteorEnabled() {
+		return meteorDeleteObject(ctx, id)
+	}
 	object, err := repository.GetStorageObject(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -481,7 +499,9 @@ func RefreshStorageCapacityScheduler() {
 
 // DownloadStorageObject 下载存储对象内容。
 func DownloadStorageObject(id string, rangeHeader string) (DownloadedStorageObject, error) {
-	if MeteorEnabled() {return meteorDownload(id,rangeHeader)}
+	if MeteorEnabled() {
+		return meteorDownload(id, rangeHeader)
+	}
 	object, err := repository.GetStorageObject(id)
 	if err != nil {
 		return DownloadedStorageObject{}, err

@@ -71,7 +71,7 @@ export default function CanvasPage() {
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
                     <div>
-                        <p className="text-xs text-stone-500">画布库 · 图片和视频缓存保留 24 小时</p>
+                        <p className="text-xs leading-6 text-stone-500">画布自最近编辑起保留 7 天，图片与视频保留 7 天。请经常导出并备份到本地。</p>
                         <h1 className="mt-3 text-3xl font-semibold">无限画布</h1>
                     </div>
                     <div className="flex items-center gap-2">

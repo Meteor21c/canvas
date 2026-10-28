@@ -191,6 +191,10 @@ func CanvasImageTaskResponse(task model.CanvasImageTask) map[string]any {
 		result["mimeType"] = task.MimeType
 		result["bytes"] = task.Bytes
 	}
+	if MeteorEnabled() && task.CompletedAt != "" {
+		result["expiresAt"] = MeteorExpiry(task.CompletedAt)
+		result["retentionDays"] = 7
+	}
 	if task.WorkflowRef != "" {
 		result["workflowRef"] = task.WorkflowRef
 	}
