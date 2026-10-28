@@ -68,8 +68,9 @@ export const useUserStore = create<UserStore>()(
             },
         }),
         {
-            name: AUTH_TOKEN_KEY,
-            partialize: (state) => ({ token: state.token }),
+            name: "meteor-canvas:session-memory",
+            storage: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+            partialize: () => ({}),
             onRehydrateStorage: () => (state) => {
                 if (state) state.isReady = false;
             },

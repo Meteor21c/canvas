@@ -25,14 +25,9 @@ export type AuthPayload = {
     password: string;
 };
 
-export async function login(payload: AuthPayload) {
-    return apiPost<AuthSession>("/api/auth/login", payload);
-}
-
-export async function register(payload: AuthPayload) {
-    return apiPost<AuthSession>("/api/auth/register", payload);
-}
-
-export async function fetchCurrentUser(token?: string) {
-    return apiGet<AuthUser>("/api/auth/me", undefined, token);
+export async function login(_payload: AuthPayload): Promise<AuthSession> { throw new Error("请通过流星 API 主站登录"); }
+export async function register(_payload: AuthPayload): Promise<AuthSession> { throw new Error("请通过流星 API 主站注册"); }
+export async function fetchCurrentUser(token?: string): Promise<AuthUser> {
+    const me = await apiGet<{id:number;email:string;username?:string;role:UserRole;balance:number;created_at:string}>("/api/v1/auth/me", undefined, token);
+    return { id:String(me.id),username:me.username || me.email, displayName:me.username || me.email,avatarUrl:"",role:me.role,credits:me.balance,createdAt:me.created_at,updatedAt:me.created_at };
 }

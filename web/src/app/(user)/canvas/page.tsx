@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
+import { nanoid } from "nanoid";
 import { readZip } from "@/lib/zip";
-import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
 import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "./components/canvas-project-card";
 import type { CanvasExportFile } from "./export-types";
-import { useCanvasStore } from "./stores/use-canvas-store";
+import { safeCanvasProject, useCanvasStore } from "./stores/use-canvas-store";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
 import { exportCanvasProjects } from "./utils/canvas-export";
 
@@ -29,7 +29,7 @@ export default function CanvasPage() {
     const enterProject = (id: string) => {
         router.push(`/canvas/${id}`);
     };
-    const createAndEnter = () => enterProject(createProject(`无限画布 ${projects.length + 1}`));
+    const createAndEnter = () => { try { enterProject(createProject(`无限画布 ${projects.length + 1}`)); } catch (error) { message.error(error instanceof Error ? error.message : "无法新建画布"); } };
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
@@ -37,20 +37,28 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(item.project));
+            if (data.app !== "infinite-canvas" || !Array.isArray(data.projects) || data.projects.length + projects.length > 20) throw new Error("无效画布或导入后超过 20 个工程");
+            const prepared = data.projects.map(item => {
+                if (!item || !Array.isArray(item.files) || item.files.length > 128) throw new Error("画布文件列表无效");
+                safeCanvasProject(item.project);
+                return item;
+            });
+            const remap = new Map<string, string>();
+            for (const item of prepared) for (const asset of item.files) {
+                if (typeof asset.storageKey !== "string" || !asset.storageKey.startsWith("image:") || !["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"].includes(asset.mimeType)) throw new Error("试用版只能导入图片素材");
+                const blob = zip.get(asset.path);
+                if (!blob) continue;
+                const key = `image:${nanoid()}`;
+                remap.set(asset.storageKey, key);
+                await setImageBlob(key, blob.slice(0, blob.size, asset.mimeType));
+            }
+            for (const item of prepared) {
+                const project = JSON.parse(JSON.stringify(item.project, (_key, value) => typeof value === "string" ? remap.get(value) || value : value));
+                importProject(project);
+            }
             message.success(`已导入 ${data.projects.length} 个画布`);
-        } catch {
-            message.error("导入失败，请选择有效的画布压缩包");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "导入失败，请选择有效的画布压缩包");
         } finally {
             if (inputRef.current) inputRef.current.value = "";
         }
@@ -62,7 +70,8 @@ export default function CanvasPage() {
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
                     <div>
                         <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-foreground/45">ARCHIVE // CANVAS DIRECTORY</p>
-                        <h1 className="mt-2 text-2xl sm:text-3xl font-medium tracking-tight">无限画布工程库</h1>
+                        <h1 className="mt-2 text-2xl sm:text-3xl font-medium tracking-tight">流星创作画布</h1>
+                        <p className="mt-3 max-w-xl text-sm leading-6 text-foreground/60">拖入图片、双击添加便笺，将节点连线后手动生成。工程云端保存；图片仅缓存在当前浏览器 24 小时，导出 ZIP 才能长期保留和转移图片。</p>
                     </div>
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
@@ -74,11 +83,6 @@ export default function CanvasPage() {
                                     删除选中
                                 </Button>
                             </>
-                        ) : null}
-                        {projects.length ? (
-                            <Button disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
-                                删除全部
-                            </Button>
                         ) : null}
                         <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
                             导入画布

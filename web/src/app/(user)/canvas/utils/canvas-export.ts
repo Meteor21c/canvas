@@ -4,7 +4,7 @@ import { createZip } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
 import type { CanvasExportAsset, CanvasExportFile } from "../export-types";
-import type { CanvasProject } from "../stores/use-canvas-store";
+import { safeCanvasProject, type CanvasProject } from "../stores/use-canvas-store";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
     const zipFiles: { name: string; data: BlobPart }[] = [];
@@ -20,7 +20,7 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
                     zipFiles.push({ name: path, data: blob });
                 }),
             );
-            return { project, files };
+            return { project: safeCanvasProject(project), files };
         }),
     );
 

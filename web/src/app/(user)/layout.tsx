@@ -1,58 +1,16 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
-
-import { AppTopNav } from "@/components/layout/app-top-nav";
-import { fetchUserConfig } from "@/services/api/user-config";
-import { useUserStore } from "@/stores/use-user-store";
-
-const protectedPrefixes = ["/asset-library"];
+import type { ReactNode } from "react";
+import Link from "next/link";
 
 export default function UserLayout({ children }: { children: ReactNode }) {
-    const pathname = usePathname();
-    const router = useRouter();
-    const user = useUserStore((state) => state.user);
-    const isReady = useUserStore((state) => state.isReady);
-    const wasLoggedOutRef = useRef(false);
-    const isProtectedPage = protectedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-
-    useEffect(() => {
-        if (!isReady || !isProtectedPage || user) return;
-        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-    }, [isProtectedPage, isReady, pathname, router, user]);
-
-    useEffect(() => {
-        if (!isReady) return;
-        if (!user) {
-            wasLoggedOutRef.current = true;
-            return;
-        }
-        const syncCanvasAfterLogin = wasLoggedOutRef.current;
-        const token = useUserStore.getState().token;
-        if (!token) return;
-        wasLoggedOutRef.current = false;
-        fetchUserConfig(token).then(async (config) => {
-            const syncEnabled = config.syncCapabilities?.userData === true;
-            const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
-            const canvasStore = useCanvasStore.getState();
-            canvasStore.setSyncEnabled(syncEnabled);
-            if (
-                syncCanvasAfterLogin &&
-                syncEnabled &&
-                canvasStore.hydrated
-            ) {
-                void canvasStore.syncWithRemote(token, true);
-            }
-            const { useAssetStore } = await import("@/stores/use-asset-store");
-            void useAssetStore.getState().hydrateAccountAssets(token, syncEnabled);
-        }).catch(() => { });
-    }, [isReady, user]);
-
     return (
-        <div className="aurora-app flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-            <AppTopNav />
-            <div className="min-h-0 flex-1 overflow-hidden">{isProtectedPage && (!isReady || !user) ? null : children}</div>
+        <div className="aurora-app flex h-full flex-col overflow-hidden bg-background text-foreground">
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 text-xs">
+                <div className="flex items-center gap-3"><a href="/" className="font-medium">流星 API</a><Link href="/canvas">创作画布 · 站主试用</Link></div>
+                <div className="flex items-center gap-3 text-foreground/60"><span>素材仅在当前浏览器缓存 24 小时，请及时导出</span><a href="/studio/source" target="_blank" rel="noopener noreferrer">Infinite Canvas · 源码与许可</a></div>
+            </header>
+            <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
         </div>
     );
 }

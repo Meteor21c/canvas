@@ -224,13 +224,8 @@ function ConnectionCreateMenu({ pending, onCreate, onClose }: { pending: Pending
                 </button>
             </div>
             <div className="grid gap-1">
-                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} />
+                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本便笺" description="双击编辑，连接图片节点作为提示词" onClick={() => onCreate(CanvasNodeType.Text)} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} />
-                <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} />
-                <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
-                <ConnectionCreateOption theme={theme} icon={<Globe2 className="size-5" />} title="全景图" description="文生全景、图生全景" onClick={() => onCreate(CanvasNodeType.Panorama)} />
-                <ConnectionCreateOption theme={theme} icon={<Layers3 className="size-5" />} title="3D 导演台" description="3D场景、角色、机位" onClick={() => onCreate(CanvasNodeType.Director)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
             </div>
         </div>
     );
@@ -281,18 +276,12 @@ function NodeCreateMenu({
                 <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onClose} aria-label="关闭">×</button>
             </div>
             <div className="grid gap-1">
-                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate(CanvasNodeType.Text)} />
+                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本便笺" description="双击编辑，连接图片节点作为提示词" onClick={() => onCreate(CanvasNodeType.Text)} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} />
-                <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} />
-                <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
-                <ConnectionCreateOption theme={theme} icon={<Globe2 className="size-5" />} title="全景图" description="文生全景、图生全景" onClick={() => onCreate(CanvasNodeType.Panorama)} />
-                <ConnectionCreateOption theme={theme} icon={<Layers3 className="size-5" />} title="3D 导演台" description="3D场景、角色、机位" onClick={() => onCreate(CanvasNodeType.Director)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
                 <div className="mb-2 mt-3 flex items-center justify-between px-1">
                     <span className="text-sm font-medium" style={{ color: theme.node.muted }}>添加资源</span>
                 </div>
-                <ConnectionCreateOption theme={theme} icon={<Upload className="size-5" />} title="上传" description="图片、视频或音频" onClick={onUpload} />
-                <ConnectionCreateOption theme={theme} icon={<Images className="size-5" />} title="从素材库选择" description="文本、图片或视频" onClick={onOpenAssetLibrary} />
+                <ConnectionCreateOption theme={theme} icon={<Upload className="size-5" />} title="上传" description="PNG、JPEG、WebP 或 GIF 图片" onClick={onUpload} />
             </div>
         </div>
     );
@@ -374,6 +363,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [nodeCreatePosition, setNodeCreatePosition] = useState<Position | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+    const manualGenerationBusy = useRef(false);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
@@ -534,7 +524,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSidePanel(project.sidePanel || DEFAULT_CANVAS_SIDE_PANEL);
             const restoredAgentPanel = project.agentPanel || DEFAULT_CANVAS_AGENT_PANEL;
             setAgentPanel(restoredAgentPanel);
-            setAssistantMounted(restoredAgentPanel.open);
+            setAssistantMounted(false);
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
@@ -551,19 +541,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         };
         void restore();
     }, [hydrated, openProject, projectId, router]);
-
-    useEffect(() => {
-        if (!projectLoaded) return;
-        const openFromLink = () => {
-            const params = new URLSearchParams(window.location.hash.slice(1));
-            if (!params.has("agentUrl") && !params.has("agentToken")) return;
-            setAssistantMounted(true);
-            setAgentPanel((current) => ({ ...current, open: true }));
-        };
-        openFromLink();
-        window.addEventListener("hashchange", openFromLink);
-        return () => window.removeEventListener("hashchange", openFromLink);
-    }, [projectLoaded, projectId]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -606,57 +583,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (!projectLoaded || historyPausedRef.current) return;
         updateProject(projectId, { nodes, connections, chatSessions, activeChatId, agentConfig, backgroundMode, showImageInfo });
     }, [activeChatId, agentConfig, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
-
-    useEffect(() => {
-        if (!projectLoaded) return;
-        const pollCanvasTasks = () => {
-            const videoTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && canvasVideoTaskId(node.metadata));
-            videoTargets.forEach((node) => {
-                if (pollingVideoNodeIdsRef.current.has(node.id)) return;
-                const taskId = canvasVideoTaskId(node.metadata);
-                const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
-                if (!taskId || !isAiConfigReady(generationConfig, generationConfig.model)) return;
-                pollingVideoNodeIdsRef.current.add(node.id);
-                void pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromMetadata(node.metadata))
-                    .then((task) => {
-                        setNodes((prev) => applyCanvasVideoTaskUpdate(prev, node.id, task, generationConfig, node.metadata?.startedAt || Date.now(), { width: node.width, height: node.height }));
-                    })
-                    .catch(() => undefined)
-                    .finally(() => {
-                        pollingVideoNodeIdsRef.current.delete(node.id);
-                    });
-            });
-            const imageTargets = nodesRef.current.filter((node) => isCanvasImageNodeType(node.type) && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && node.metadata.imageTaskId);
-            imageTargets.forEach((node) => {
-                if (pollingImageNodeIdsRef.current.has(node.id) || !node.metadata?.imageTaskId) return;
-                pollingImageNodeIdsRef.current.add(node.id);
-                void pollCanvasImageTaskStatus(node.metadata.imageTaskId)
-                    .then((task) => {
-                        setNodes((prev) => applyCanvasImageTaskUpdate(prev, node.id, task, node.metadata?.startedAt || Date.now(), { width: node.width, height: node.height }));
-                    })
-                    .catch(() => undefined)
-                    .finally(() => {
-                        pollingImageNodeIdsRef.current.delete(node.id);
-                    });
-            });
-            const audioTargets = nodesRef.current.filter((node) => node.type === CanvasNodeType.Audio && node.metadata?.status === NODE_STATUS_LOADING && !node.metadata.content && node.metadata.audioTaskId);
-            audioTargets.forEach((node) => {
-                if (pollingAudioNodeIdsRef.current.has(node.id) || !node.metadata?.audioTaskId) return;
-                pollingAudioNodeIdsRef.current.add(node.id);
-                void pollCanvasAudioTaskStatus(node.metadata.audioTaskId)
-                    .then((task) => {
-                        setNodes((prev) => applyCanvasAudioTaskUpdate(prev, node.id, task, node.metadata?.startedAt || Date.now()));
-                    })
-                    .catch(() => undefined)
-                    .finally(() => {
-                        pollingAudioNodeIdsRef.current.delete(node.id);
-                    });
-            });
-        };
-        pollCanvasTasks();
-        const timer = window.setInterval(pollCanvasTasks, VIDEO_POLL_INTERVAL_MS);
-        return () => window.clearInterval(timer);
-    }, [effectiveConfig, isAiConfigReady, projectLoaded]);
 
     useEffect(() => {
         if (!hasLoadingTimedNodes) return;
@@ -783,6 +709,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType, pending: PendingConnectionCreate) => {
+            if (![CanvasNodeType.Text, CanvasNodeType.Image].includes(type)) return;
             const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
@@ -1053,6 +980,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [connections, nodeById, nodes]);
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position, textContent?: string, nodeId?: string) => {
+            if (![CanvasNodeType.Text, CanvasNodeType.Image].includes(type)) return;
             const targetPosition = position || getCanvasCenter();
             const configMetadata =
                 type === CanvasNodeType.Config
@@ -1392,17 +1320,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, [applyHistory]);
 
     const createAndOpenProject = useCallback(() => {
-        const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);
-        router.push(`/canvas/${id}`);
-    }, [createProject, router]);
+        try { const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`); router.push(`/canvas/${id}`); }
+        catch (error) { message.error(error instanceof Error ? error.message : "无法新建画布"); }
+    }, [createProject, router, message]);
 
     const deleteCurrentProject = useCallback(() => {
-        void deleteCanvasProjects([projectId]).catch(() => undefined);
-        deleteCanvasTaskRecords();
-        deleteProjects([projectId]);
-        cleanupAssetImages();
-        router.push("/canvas");
-    }, [cleanupAssetImages, deleteCanvasTaskRecords, deleteProjects, projectId, router]);
+        if (!window.confirm("删除当前画布？请先导出需要保留的图片。已提交任务不会取消或退款。")) return;
+        void deleteCanvasProjects([projectId]).then(() => { deleteProjects([projectId]); router.push("/canvas"); }).catch(error => message.error(error instanceof Error ? error.message : "删除失败，画布已保留"));
+    }, [deleteProjects, projectId, router, message]);
 
     const handleCanvasMouseDown = useCallback(
         (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1682,7 +1607,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const hideLoading = message.loading("正在上传图片...", 0);
         try {
             const image = await uploadImage(file);
-            if (choosePanoramaImport && image.width === image.height * 2) {
+            if (false && choosePanoramaImport && image.width === image.height * 2) {
                 setPendingPanoramaImport({ image, title: file.name, position });
                 return;
             }
@@ -2619,7 +2544,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         async (event: ReactChangeEvent<HTMLInputElement>) => {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
-            if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+            if (!file || !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) return;
             const targetNode = target?.nodeId ? nodesRef.current.find((node) => node.id === target.nodeId) : null;
             if (isPanoramaNodeType(targetNode?.type) && !file.type.startsWith("image/")) {
                 message.warning("全景图节点仅支持上传图片作为参考");
@@ -2697,7 +2622,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 }
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position, true));
+                if (file.type.startsWith("image/")) void createImageFileNode(file, position, false);
             }
 
             uploadTargetRef.current = null;
@@ -2743,7 +2668,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!file) return;
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos, true));
+            if (file.type.startsWith("image/")) void createImageFileNode(file, pos, false);
         },
         [createAudioFileNode, createImageFileNode, createVideoFileNode, insertAssetAt, screenToCanvas],
     );
@@ -2785,14 +2710,16 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
+            if (!( ["image"] as string[]).includes(mode)) { message.info("文本节点用于编辑提示词，请连接图片节点后点击生成。"); return; }
+            if (manualGenerationBusy.current) { message.info("请等待当前图片生成完成"); return; }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            if (sourceNode && ![CanvasNodeType.Text, CanvasNodeType.Image].includes(sourceNode.type)) return;
+            const generationConfig = { ...buildGenerationConfig(effectiveConfig, sourceNode, mode), count: "1", canvasImageCount: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
 
-            setRunningNodeId(nodeId);
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const generationContext = await hydrateNodeGenerationContext(
@@ -2806,9 +2733,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const markSourceStatus = !isCanvasImageNodeType(sourceNode?.type) && !editingTextNode;
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
+                manualGenerationBusy.current = false;
                 setRunningNodeId(null);
                 return;
             }
+            manualGenerationBusy.current = true;
+            setRunningNodeId(nodeId);
             let pendingChildIds: string[] = [];
             const generationStartedAt = Date.now();
             if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: statusPrompt, status: NODE_STATUS_LOADING, startedAt: generationStartedAt, durationMs: undefined, errorDetails: undefined } } : node)));
@@ -3221,6 +3151,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } }) : node)),
                 );
             } finally {
+                manualGenerationBusy.current = false;
                 setRunningNodeId(null);
             }
         },
@@ -3695,6 +3626,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
+            if (!window.confirm("重新生成会提交新的付费请求。若上次提交结果未知，请先在主站使用记录确认是否已扣费。确定继续？")) return;
+            if (manualGenerationBusy.current) { message.info("请等待当前图片生成完成"); return; }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const isPanorama = isPanoramaNodeType(node.type);
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
@@ -3815,9 +3748,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             const sourceNode = nodesRef.current.find((item) => item.id === node.id);
             if (!sourceNode) return;
-            const nodeSize = getNodeSpec(CanvasNodeType.Config);
+            const nodeSize = getNodeSpec(CanvasNodeType.Image);
             const configNode = createCanvasNode(
-                CanvasNodeType.Config,
+                CanvasNodeType.Image,
                 {
                     x: sourceNode.position.x + sourceNode.width + 96 + nodeSize.width / 2,
                     y: sourceNode.position.y + sourceNode.height / 2,
@@ -3826,7 +3759,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     prompt: "",
                     model: effectiveConfig.imageModel || effectiveConfig.model,
                     size: effectiveConfig.size,
-                    count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                    count: 1,
                 },
             );
             const connection = { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: configNode.id };
@@ -3996,14 +3929,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onCancelTitleEditing={() => setTitleEditing(false)}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
-                    onHome={() => router.push("/")}
+                    onHome={() => { window.location.href = "/"; }}
                     onProjects={() => router.push("/canvas")}
                     onCreateProject={createAndOpenProject}
                     onDeleteProject={deleteCurrentProject}
                     onImportImage={() => handleUploadRequest()}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
-                    assistantCollapsed={!agentPanel.open}
+                    assistantCollapsed={false}
                     onExpandAssistant={() => {
                         setAssistantMounted(true);
                         setAgentPanel((current) => ({ ...current, open: true }));
@@ -4152,7 +4085,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onTitleChange={handleNodeTitleChange}
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
-                            onRetry={(node) => void handleRetryNode(node)}
+                            onRetry={() => message.info("请先在主站核对上次使用记录；确认后可复制节点手动提交新请求。")}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onSelectReference={selectNodeReference}
                             onContextMenu={(event, id) => {
@@ -4245,7 +4178,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
-                    onRetry={(node) => void handleRetryNode(node)}
+                    onRetry={() => message.info("请先在主站核对上次使用记录；确认后可复制节点手动提交新请求。")}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                 />
@@ -4341,7 +4274,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         </button>
                     </div>
                 ) : null}
-                <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleImageInputChange} />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
 
@@ -4504,7 +4437,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
                 <AssetPickerModal open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setAssetPickerOpen(false); }} />
             </section>
-            {assistantMounted ? (
+            {assistantMounted && false ? (
                 <CanvasAssistantPanel
                     canvasId={projectId}
                     nodes={nodes}
@@ -4895,7 +4828,7 @@ function CanvasTopBar({
                     <Shortcut keys={["Ctrl / Cmd", "Shift", "Z"]} value="重做" />
                     <Shortcut keys={["Delete / Backspace"]} value="删除选中" />
                     <Shortcut keys={["Esc"]} value="取消选择并关闭浮层" />
-                    <Shortcut keys={["拖入图片/视频/音频"]} value="上传到画布" />
+                    <Shortcut keys={["拖入图片"]} value="上传到画布" />
                 </div>
             </Modal>
         </>
@@ -5062,8 +4995,15 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
         nodes.map(async (node) => {
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (!isCanvasImageNodeType(node.type) || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
+            if (!isCanvasImageNodeType(node.type)) return node;
+            if (node.metadata?.storageKey) {
+                try {
+                    const url = await resolveImageUrl(node.metadata.storageKey, content || "");
+                    if (!url) throw new Error("expired");
+                    return { ...node, metadata: { ...node.metadata, content: url } };
+                } catch { return { ...node, metadata: { ...node.metadata, content: "", status: NODE_STATUS_ERROR, errorDetails: "图片已过期或不在当前浏览器，请重新上传；不会自动生成或扣费。" } }; }
+            }
+            if (!content) return node;
             if (!content.startsWith("data:image/")) return node;
             return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content, { localOnly: true })) } };
         }),
@@ -5425,7 +5365,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) => (node.metadata?.status === "loading" && !canvasRecoverableTaskId(node) ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
+    return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面已重新打开，先在主站使用记录核对上次提交结果；不会自动重发请求或再次扣费。" } } : node));
 }
 
 function canvasRecoverableTaskId(node: CanvasNodeData) {

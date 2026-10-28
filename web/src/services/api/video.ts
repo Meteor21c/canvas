@@ -312,7 +312,7 @@ async function pollSub2APIDirectWithRetry(config: AiConfig, model: string, pollO
                 consecutive404 = 0;
                 transientRetries++;
                 if (transientRetries > 5) throw error;
-                delay = Math.max(delay, sub2APIRetryAfterMs(error.response?.headers, transientRetries));
+                delay = Math.max(delay, sub2APIRetryAfterMs(axios.isAxiosError(error) ? error.response?.headers : undefined, transientRetries));
             } else if (status >= 500) {
                 consecutive404 = 0;
                 transientRetries++;

@@ -1,106 +1,53 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { App } from "antd";
-
-import { fetchUserConfig } from "@/services/api/user-config";
-import { STORAGE_SYNC_FAILED_EVENT, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider } from "@/services/image-storage";
-import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
+import { Button } from "antd";
+import { initializeMeteorCanvas, clearMeteorCanvasSession } from "@/services/api/meteor-gateway";
+import { clearCanvasSession, hydrateCanvasProjects, useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
-    const { message } = App.useApp();
-    const handledConfigParams = useRef(false);
     const pathname = usePathname();
-    const token = useUserStore((state) => state.token);
-    const user = useUserStore((state) => state.user);
-    const hydrateUser = useUserStore((state) => state.hydrateUser);
-    const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
-    const publicSettings = useConfigStore((state) => state.publicSettings);
-    const channelMode = useConfigStore((state) => state.config.channelMode);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const isLoginPage = pathname === "/login" || pathname === "/admin/login";
-    const adminRemoteTokenRef = useRef("");
-
+    const publicPage = /\/(?:source|pilot-health)\/?$/.test(pathname);
+    const [ready, setReady] = useState(false);
+    const [error, setError] = useState("");
+    const serial = useRef(0);
+    const syncError = useCanvasStore(state => state.syncError);
+    const saving = useCanvasStore(state => state.saving);
+    const retrySaves = useCanvasStore(state => state.retrySaves);
     useEffect(() => {
-        const onSyncFailed = (event: Event) => {
-            const detail = (event as CustomEvent<string>).detail;
-            message.warning({ key: STORAGE_SYNC_FAILED_EVENT, content: `云端同步失败，已保留原始素材${detail ? `：${detail}` : ""}` });
+        if (publicPage) return;
+        let disposed = false;
+        const start = async () => {
+            const generation = ++serial.current;
+            setReady(false); setError(""); clearCanvasSession(); clearMeteorCanvasSession();
+            try {
+                await initializeMeteorCanvas();
+                if (disposed || generation !== serial.current) return;
+                await hydrateCanvasProjects();
+                if (!disposed && generation === serial.current) setReady(true);
+            } catch (failure) {
+                if (!disposed && generation === serial.current) setError(failure instanceof Error ? failure.message : "无法初始化画布");
+            }
         };
-        window.addEventListener(STORAGE_SYNC_FAILED_EVENT, onSyncFailed);
-        return () => window.removeEventListener(STORAGE_SYNC_FAILED_EVENT, onSyncFailed);
-    }, [message]);
-
-    useEffect(() => {
-        void loadPublicSettings();
-    }, [loadPublicSettings]);
-
-    useEffect(() => {
-        if (!isLoginPage) void hydrateUser();
-    }, [hydrateUser, isLoginPage]);
-
-    useEffect(() => {
-        if (!token || user?.role !== "admin" || adminRemoteTokenRef.current === token) return;
-        adminRemoteTokenRef.current = token;
-        if (channelMode !== "remote") updateConfig("channelMode", "remote");
-    }, [channelMode, token, updateConfig, user?.role]);
-
-    useEffect(() => {
-        if (!token || !user?.id) return;
-        void fetchUserConfig(token)
-            .then((payload) => {
-                const syncS3 = payload.modelConfig?.syncStorageConfig === true;
-                const syncWebDAV = payload.modelConfig?.syncWebDAVStorageConfig === true;
-                if (payload.modelConfig) {
-                    Object.entries(payload.modelConfig)
-                        .forEach(([key, value]) => updateConfig(key as keyof AiConfig, value as never));
-                }
-                updateConfig("syncStorageConfig", syncS3);
-                updateConfig("syncWebDAVStorageConfig", syncWebDAV);
-                if (syncS3 && payload.storageProvider?.s3) {
-                    saveUserStorageProvider({
-                        ...defaultUserStorageProvider(),
-                        ...payload.storageProvider.s3,
-                        type: "s3",
-                    });
-                }
-                if (syncWebDAV && payload.storageProvider?.webdav) {
-                    saveUserWebDAVStorageProvider({
-                        ...defaultUserWebDAVStorageProvider(),
-                        ...payload.storageProvider.webdav,
-                        type: "webdav",
-                    });
-                }
-            })
-            .catch(() => {});
-    }, [token, updateConfig, user?.id]);
-
-    useEffect(() => {
-        if (handledConfigParams.current) return;
-        const searchParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
-        const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
-        if (!baseUrl && !apiKey) return;
-        if (!publicSettings) return;
-        handledConfigParams.current = true;
-        searchParams.delete("baseUrl");
-        searchParams.delete("baseurl");
-        searchParams.delete("apiKey");
-        searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
-        if (!publicSettings.modelChannel.allowCustomChannel) {
-            openConfigDialog(false);
-            message.error("后台未允许用户自定义渠道，请联系管理员进行配置");
-            return;
-        }
-        updateConfig("channelMode", "local");
-        if (baseUrl) updateConfig("baseUrl", baseUrl);
-        if (apiKey) updateConfig("apiKey", apiKey);
-        openConfigDialog(false);
-    }, [message, openConfigDialog, publicSettings, updateConfig]);
-
-    return <>{children}</>;
+        let previousToken = localStorage.getItem("auth_token");
+        const onSession = () => {
+            const token = localStorage.getItem("auth_token");
+            if (token === previousToken) return;
+            previousToken = token;
+            void start();
+        };
+        const onStorage = (event: StorageEvent) => { if (event.key === "auth_token" || event.key === "auth_user" || event.key === null) onSession(); };
+        const onVisibility = () => { if (document.visibilityState === "visible") onSession(); };
+        const onBeforeUnload = (event: BeforeUnloadEvent) => { if (useCanvasStore.getState().saving || useCanvasStore.getState().syncError) event.preventDefault(); };
+        void start();
+        window.addEventListener("storage", onStorage);
+        document.addEventListener("visibilitychange", onVisibility);
+        window.addEventListener("beforeunload", onBeforeUnload);
+        return () => { disposed = true; serial.current++; window.removeEventListener("storage", onStorage); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("beforeunload", onBeforeUnload); clearCanvasSession(); clearMeteorCanvasSession(); };
+    }, [publicPage]);
+    if (publicPage) return <>{children}</>;
+    if (!ready) return <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background p-8 text-foreground"><h1 className="text-xl font-medium">流星创作画布 · 试用</h1><p>{error || "正在验证站主身份并读取画布…"}</p>{error ? <a href="/login">返回流星 API 登录</a> : null}<a href="/">返回主站</a></main>;
+    return <div className="flex h-dvh flex-col overflow-hidden"><div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 py-1 text-xs text-foreground" role="status"><span>{syncError || (saving ? "正在保存画布…" : "画布已自动保存 · 每次仅手动生成一张图片")}</span>{syncError ? <Button size="small" onClick={retrySaves}>重试保存</Button> : null}</div><div className="min-h-0 flex-1">{children}</div></div>;
 }

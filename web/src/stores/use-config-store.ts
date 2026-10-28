@@ -351,111 +351,26 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    const channel = localChannelForActiveModel({ ...config, model });
-    return Boolean(model.trim()) && (config.channelMode === "remote" || Boolean(channel?.baseUrl.trim() && channel?.apiKey.trim()));
+    return Boolean(useUserStore.getState().user && config.localChannels.some(channel => channel.models.includes(model)));
 }
 
-export const useConfigStore = create<ConfigStore>()(
-    persist(
-        (set, get) => ({
-            config: defaultConfig,
-            publicSettings: null,
-            isPublicSettingsLoading: false,
-            isConfigOpen: false,
-            shouldPromptContinue: false,
-            updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
-            loadPublicSettings: async () => {
-                if (get().isPublicSettingsLoading) return;
-                set({ isPublicSettingsLoading: true });
-                try {
-                    set({ publicSettings: await apiGet<AdminPublicSettings>("/api/settings") });
-                } finally {
-                    set({ isPublicSettingsLoading: false });
-                }
-            },
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
-            setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
-            clearPromptContinue: () => set({ shouldPromptContinue: false }),
-        }),
-        {
-            name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config }),
-            merge: (persisted, current) => {
-                const persistedState = (persisted || {}) as Partial<ConfigStore>;
-                const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
-                const config = { ...defaultConfig, ...persistedConfig };
-                const localChannels = normalizeLocalChannels(config);
-                const localModels = normalizeModelList(localChannels.flatMap((channel) => channel.models));
-                return {
-                    ...current,
-                    config: {
-                        ...config,
-                        localChannels,
-                        models: localModels,
-                        baseUrl: localChannels[0]?.baseUrl || config.baseUrl,
-                        apiKey: localChannels[0]?.apiKey || config.apiKey,
-                        imageChannelId: config.imageChannelId || localChannels[0]?.id || "",
-                        videoChannelId: config.videoChannelId || localChannels[0]?.id || "",
-                        textChannelId: config.textChannelId || localChannels[0]?.id || "",
-                        audioChannelId: config.audioChannelId || localChannels[0]?.id || "",
-                        activeChannelId: config.activeChannelId || "",
-                        syncStorageConfig: config.syncStorageConfig === true,
-                        syncWebDAVStorageConfig: config.syncWebDAVStorageConfig === true,
-                        channelMode: config.channelMode || "remote",
-                        imageModel: config.imageModel || config.model,
-                        videoModel: config.videoModel || "grok-imagine-video",
-                        textModel: config.textModel || config.model,
-                        audioModel: config.audioModel || defaultConfig.audioModel,
-                        audioVoice: config.audioVoice || defaultConfig.audioVoice,
-                        audioFormat: config.audioFormat || defaultConfig.audioFormat,
-                        audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
-                        grokTtsVoice: config.grokTtsVoice || defaultConfig.grokTtsVoice,
-                        grokTtsLanguage: config.grokTtsLanguage || defaultConfig.grokTtsLanguage,
-                        grokTtsFormat: config.grokTtsFormat || defaultConfig.grokTtsFormat,
-                        grokTtsSpeed: config.grokTtsSpeed || defaultConfig.grokTtsSpeed,
-                        glmTtsVoice: config.glmTtsVoice || defaultConfig.glmTtsVoice,
-                        glmTtsFormat: config.glmTtsFormat || defaultConfig.glmTtsFormat,
-                        glmTtsSpeed: config.glmTtsSpeed || defaultConfig.glmTtsSpeed,
-                        geminiTtsVoice: config.geminiTtsVoice || defaultConfig.geminiTtsVoice,
-                        systemPrompts: config.systemPrompts?.image ? config.systemPrompts : defaultConfig.systemPrompts,
-                        audioInstructions: config.audioInstructions || "",
-                        videoSeconds: config.videoSeconds || "6",
-                        videoMode: config.videoMode || "std",
-                        videoNegativePrompt: config.videoNegativePrompt || "",
-                        vquality: config.vquality || "720",
-                        videoGenerateAudio: config.videoGenerateAudio || "false",
-                        videoWatermark: config.videoWatermark || "false",
-                        canvasImageCount: config.canvasImageCount || "1",
-                        imageModels: filterChannelModelsByCapability(localChannels, "image"),
-                        videoModels: filterChannelModelsByCapability(localChannels, "video"),
-                        textModels: filterChannelModelsByCapability(localChannels, "text"),
-                        audioModels: filterChannelModelsByCapability(localChannels, "audio"),
-                    },
-                };
-            },
-        },
-    ),
-);
+// Credentials and channel configuration are never persisted by the pilot.
+export const useConfigStore = create<ConfigStore>()((set) => ({
+    config: { ...defaultConfig, baseUrl:"", model:"", imageModel:"" },
+    publicSettings: null, isPublicSettingsLoading:false, isConfigOpen:false, shouldPromptContinue:false,
+    updateConfig: (key,value) => set(state => ({config:{...state.config,[key]:value}})),
+    loadPublicSettings: async () => undefined,
+    isAiConfigReady,
+    openConfigDialog: () => undefined,
+    setConfigDialogOpen: () => undefined,
+    clearPromptContinue: () => undefined,
+}));
 
 function normalizeModelList(models: string[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)));
 }
 
-export function useEffectiveConfig() {
-    const config = useConfigStore((state) => state.config);
-    const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
-    const token = useUserStore((state) => state.token);
-    const user = useUserStore((state) => state.user);
-    const canUseRemoteChannel = Boolean(token && user && (user.role === "admin" || modelChannel?.allowUserRemoteChannel === true));
-    return useMemo(() => resolveEffectiveConfig(config, modelChannel, canUseRemoteChannel), [canUseRemoteChannel, config, modelChannel]);
-}
+export function useEffectiveConfig() { return useConfigStore(state => state.config); }
 
 export function buildApiUrl(baseUrl: string, path: string) {
     let normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");

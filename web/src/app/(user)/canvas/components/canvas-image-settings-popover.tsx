@@ -34,7 +34,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const effectiveShowSize = showSize;
-    const effectiveShowCount = showCount;
+    const effectiveShowCount = false;
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);

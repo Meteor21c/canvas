@@ -28,18 +28,9 @@ export async function syncCanvasProjects(
     );
 }
 
-export async function deleteCanvasTasks(sourceId: string, nodeIds: string[] = []) {
-    const token = useUserStore.getState().token;
-    const source = sourceId.trim();
-    if (!token || !source) return;
-    return apiPost<{ deleted: boolean }>(
-        "/api/v1/canvas/tasks/delete",
-        {
-            source_id: source,
-            node_ids: Array.from(new Set(nodeIds.map((id) => id.trim()).filter(Boolean))),
-        },
-        token,
-    );
+// Removing a node does not cancel/refund an already submitted upstream job.
+export async function deleteCanvasTasks(_sourceId: string, _nodeIds: string[] = []) {
+    return { deleted: false };
 }
 
 export async function deleteCanvasProjects(ids: string[]) {
@@ -48,6 +39,9 @@ export async function deleteCanvasProjects(ids: string[]) {
         new Set(ids.map((id) => id.trim()).filter(Boolean)),
     );
     if (!token || !projectIds.length) return;
+    const { waitForCanvasWrites } = await import("@/app/(user)/canvas/stores/use-canvas-store");
+    await waitForCanvasWrites(projectIds);
+    if (useUserStore.getState().token !== token) throw new Error("登录状态已变化");
     return apiPost<{ deleted: boolean }>(
         "/api/v1/canvas/projects/delete",
         { ids: projectIds },

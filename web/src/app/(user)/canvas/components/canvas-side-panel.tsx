@@ -68,12 +68,7 @@ const NODE_TYPE_LABEL = {
 const NODE_FILTER_OPTIONS = [
     { label: "全部", value: "all" },
     { label: "图片", value: CanvasNodeType.Image },
-    { label: "全景图", value: CanvasNodeType.Panorama },
     { label: "文本", value: CanvasNodeType.Text },
-    { label: "配置", value: CanvasNodeType.Config },
-    { label: "视频", value: CanvasNodeType.Video },
-    { label: "音频", value: CanvasNodeType.Audio },
-    { label: "导演台", value: CanvasNodeType.Director },
     { label: "组", value: CanvasNodeType.Group },
 ];
 
@@ -147,8 +142,6 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, open, width, onWidthCh
             >
                 <div className="flex items-center gap-5 px-4 pt-3.5">
                     <PanelTabButton label="画布" active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
-                    <PanelTabButton label="资产" active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
-                    <PanelTabButton label="提示词库" active={tab === "prompts"} theme={theme} onClick={() => setTab("prompts")} />
                 </div>
                 <div className="mt-2 min-h-0 flex-1 overflow-hidden">
                     {tab === "canvas" ? (

@@ -25,8 +25,8 @@ export type StorageCapacityResult = {
     providerName: string;
 };
 
-export async function fetchUserConfig(token: string) {
-    return apiGet<UserConfigPayload>("/api/v1/user-config", undefined, token);
+export async function fetchUserConfig(_token: string): Promise<UserConfigPayload> {
+    return {syncCapabilities:{userData:true,workflows:false,assets:false}};
 }
 
 export async function syncUserModelConfig(token: string, config: AiConfig) {

@@ -6,6 +6,8 @@
     "scripts": {
         "dev": "next dev --webpack -H 0.0.0.0 -p 3000",
         "build": "next build",
+        "typecheck": "tsc --noEmit",
+        "test:pilot": "node --test tests/pilot-route-policy.test.mjs && bun test ./tests/pilot-gateway.test.ts",
         "start": "next start",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
