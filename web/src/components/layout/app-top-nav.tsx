@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, ReceiptText } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -70,17 +70,19 @@ export function AppTopNav() {
                                 <Link
                                     href="/pricing"
                                     className={cn(
-                                        "relative flex h-16 shrink-0 items-center text-sm transition after:absolute after:inset-x-0 after:bottom-0 after:h-px",
+                                        "relative flex h-16 shrink-0 items-center gap-2 text-sm transition after:absolute after:inset-x-0 after:bottom-0 after:h-px",
                                         pathname === "/pricing" ? "font-medium text-stone-950 after:bg-stone-950 dark:text-stone-100 dark:after:bg-stone-100" : "text-stone-500 hover:text-stone-950 dark:text-stone-400 dark:hover:text-stone-100",
                                     )}
                                 >
+                                    <ReceiptText className="size-4" />
                                     计价标准
                                 </Link>
                             </nav>
                         </div>
 
                         <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
-                            <Link href="/pricing" className="mr-1 hidden text-xs text-stone-500 transition hover:text-stone-950 sm:inline-flex xl:hidden dark:text-stone-400 dark:hover:text-stone-100">
+                            <Link href="/pricing" className="mr-1 hidden items-center gap-1.5 text-xs text-stone-500 transition hover:text-stone-950 sm:inline-flex xl:hidden dark:text-stone-400 dark:hover:text-stone-100">
+                                <ReceiptText className="size-4" />
                                 计价标准
                             </Link>
                             <UserStatusActions />

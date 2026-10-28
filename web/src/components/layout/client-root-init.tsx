@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { migrateImageSettings } from "@/lib/image-resolution";
 import { usePathname } from "next/navigation";
 import { App } from "antd";
 
@@ -100,7 +101,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 						}
 					}
                     if (canceled || useUserStore.getState().token !== accountToken || useUserStore.getState().user?.id !== accountId) return;
-					Object.entries(modelConfig)
+					Object.entries({ ...modelConfig, ...migrateImageSettings(modelConfig) })
 						.forEach(([key, value]) => updateConfig(key as keyof AiConfig, value as never));
 				}
 				updateConfig("workflowSyncTouched", workflowsReady);

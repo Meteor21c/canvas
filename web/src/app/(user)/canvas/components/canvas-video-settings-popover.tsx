@@ -7,6 +7,8 @@ import { Button, Input, Switch } from "antd";
 
 import { VideoSettingsPanel, isAPIMartKlingMotionControlConfig, isKIEKlingMotionControlConfig, isAPIMartKlingV3Config, isKIEKlingV3Config, kieKlingOmniVariant, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { isAutoDLConfig } from "@/lib/autodl";
+import { useVideoCapabilities } from "@/hooks/use-meteor-pricing";
+import { REFERENCE_UPLOAD_NOTICE } from "@/lib/meteor-video-input";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { modelKey, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -81,36 +83,47 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, frameOption
 }
 
 function VideoSettingsPortal({ buttonRect, panelRef, placement, theme, config, onConfigChange, frameOptions, resourceOptions, metadata, firstFrameNodeId, lastFrameNodeId, onFrameChange, onMetadataChange, visualOnly }: { buttonRect: DOMRect; panelRef: RefObject<HTMLDivElement | null>; placement: CanvasVideoSettingsPopoverProps["placement"]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; config: AiConfig; onConfigChange: CanvasVideoSettingsPopoverProps["onConfigChange"]; frameOptions: CanvasVideoFrameOption[]; resourceOptions: CanvasVideoResourceOption[]; metadata?: CanvasNodeMetadata; firstFrameNodeId?: string; lastFrameNodeId?: string; onFrameChange?: CanvasVideoSettingsPopoverProps["onFrameChange"]; onMetadataChange?: CanvasVideoSettingsPopoverProps["onMetadataChange"]; visualOnly: boolean }) {
-    const width = 356;
+    const width = Math.min(356, window.innerWidth - 24);
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
     const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
     const topPlacement = placement?.startsWith("top");
-    const style = { position: "fixed", zIndex: 1200, width, left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)), ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }), background: theme.toolbar.panel, borderRadius: 18, boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)", padding: 18, overflowY: "auto", color: theme.node.text } as const;
+    const above = Math.max(0, buttonRect.top - gap - margin);
+    const below = Math.max(0, window.innerHeight - buttonRect.bottom - gap - margin);
+    const openAbove = topPlacement ? above >= Math.min(260, window.innerHeight / 2) || above >= below : below < Math.min(260, window.innerHeight / 2) && above > below;
+    const style = { position: "fixed", zIndex: 1200, width, left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)), ...(openAbove ? { bottom: Math.max(margin, window.innerHeight - buttonRect.top + gap), maxHeight: Math.max(40, above) } : { top: Math.max(margin, buttonRect.bottom + gap), maxHeight: Math.max(40, below) }), background: theme.toolbar.panel, borderRadius: 18, boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)", padding: 18, overflowY: "auto", color: theme.node.text } as const;
     const model = config.model || config.videoModel || "";
+    const siteVideo = (config.videoChannelId || config.activeChannelId).startsWith("meteor-key-");
+    const capabilities = useVideoCapabilities(config, model, undefined, siteVideo);
+    const videoInput = siteVideo ? capabilities.data?.videoInput : undefined;
     const isAPIMartKlingV3 = isAPIMartKlingV3Config(config, model);
     const isKIEKlingV3 = isKIEKlingV3Config(config, model);
     const kieKlingOmni = kieKlingOmniVariant(config, model);
     const isKlingMotionControl = isAPIMartKlingMotionControlConfig(config, model) || isKIEKlingMotionControlConfig(config, model) || (channelProtocolForConfig({ ...config, model, videoModel: model }) === "tokendance" && modelKey(model) === "kling-3-0");
     const isKlingV3 = isAPIMartKlingV3 || isKIEKlingV3;
-    const frameReferencesEnabled = !isKlingV3 && supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
+    const frameReferencesEnabled = siteVideo ? Boolean(videoInput?.modes.includes("frames") && (videoInput.firstFrame || videoInput.lastFrame)) : !isKlingV3 && supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
     const optionIds = useMemo(() => new Set(frameOptions.map((item) => item.nodeId)), [frameOptions]);
     const firstFrameValue = firstFrameNodeId && optionIds.has(firstFrameNodeId) ? firstFrameNodeId : "";
     const lastFrameValue = lastFrameNodeId && optionIds.has(lastFrameNodeId) ? lastFrameNodeId : "";
+    const invalidFirstFrame = Boolean(siteVideo && videoInput && firstFrameNodeId && (!frameReferencesEnabled || !videoInput.firstFrame || !optionIds.has(firstFrameNodeId)));
+    const invalidLastFrame = Boolean(siteVideo && videoInput && lastFrameNodeId && (!frameReferencesEnabled || !videoInput.lastFrame || !optionIds.has(lastFrameNodeId) || (videoInput.lastFrameRequiresFirst && !firstFrameValue)));
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             <div className="space-y-4">
                 <div className="text-lg font-semibold">视频设置</div>
-                {!visualOnly && isKlingMotionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} theme={theme} onChange={(value) => onConfigChange("videoCharacterOrientation", value)} /> : null}
-                {!visualOnly && isKlingV3 ? <KlingV3AdvancedSettings config={config} metadata={metadata} resourceOptions={resourceOptions} theme={theme} isKIEKlingV3={isKIEKlingV3} kieKlingOmni={kieKlingOmni} onConfigChange={onConfigChange} onMetadataChange={onMetadataChange} /> : null}
+                {!visualOnly && !siteVideo && isKlingMotionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} theme={theme} onChange={(value) => onConfigChange("videoCharacterOrientation", value)} /> : null}
+                {!visualOnly && !siteVideo && isKlingV3 ? <KlingV3AdvancedSettings config={config} metadata={metadata} resourceOptions={resourceOptions} theme={theme} isKIEKlingV3={isKIEKlingV3} kieKlingOmni={kieKlingOmni} onConfigChange={onConfigChange} onMetadataChange={onMetadataChange} /> : null}
+                {siteVideo ? <div className="space-y-1 text-[11px] leading-4 opacity-65"><p>{REFERENCE_UPLOAD_NOTICE} · 素材保留7天</p><p>可用输入：{videoInput ? videoInput.modes.map((mode) => mode === "text" ? "文字" : mode === "frames" ? "首尾帧" : "参考素材").join("、") : "正在读取"}</p>{videoInput?.validationNotice ? <p>{videoInput.validationNotice}</p> : null}</div> : null}
+                {invalidFirstFrame || invalidLastFrame ? <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-5"><p>原首尾帧选择仍已保留，当前模型不支持或关联素材不可用。请调整或明确移除后再生成。</p>{invalidFirstFrame ? <button type="button" className="mr-3 underline underline-offset-2" onClick={() => onFrameChange?.({ firstFrameNodeId: undefined })}>移除原首帧</button> : null}{invalidLastFrame ? <button type="button" className="underline underline-offset-2" onClick={() => onFrameChange?.({ lastFrameNodeId: undefined })}>移除原尾帧</button> : null}</div> : null}
                 {!visualOnly && frameReferencesEnabled ? (
                     <CanvasSettingGroup title="首尾帧" color={theme.node.muted}>
                         <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
-                            <FrameReferencePicker label="首帧" value={firstFrameValue} options={frameOptions} theme={theme} onChange={(value) => onFrameChange?.({ firstFrameNodeId: value || undefined })} />
-                            <FrameReferencePicker label="尾帧" value={lastFrameValue} options={frameOptions} theme={theme} onChange={(value) => onFrameChange?.({ lastFrameNodeId: value || undefined })} />
+                            {!siteVideo || videoInput?.firstFrame ? <FrameReferencePicker label="首帧" value={firstFrameValue} options={frameOptions} theme={theme} onChange={(value) => { onFrameChange?.({ firstFrameNodeId: value || undefined }); if (siteVideo && value && /seedance[-_.]?2[.-]?5/i.test(model)) onConfigChange("size", "adaptive"); }} /> : null}
+                            {siteVideo && firstFrameValue && /seedance[-_.]?2[.-]?5/i.test(model) ? <p className="text-[11px] opacity-65">首帧模式使用素材比例（adaptive）</p> : null}
+                            {!siteVideo || videoInput?.lastFrame ? <div className={siteVideo && videoInput?.lastFrameRequiresFirst && !firstFrameValue ? "pointer-events-none opacity-45" : undefined} aria-disabled={siteVideo && videoInput?.lastFrameRequiresFirst && !firstFrameValue} inert={siteVideo && videoInput?.lastFrameRequiresFirst && !firstFrameValue}><FrameReferencePicker label="尾帧" value={lastFrameValue} options={frameOptions} theme={theme} onChange={(value) => onFrameChange?.({ lastFrameNodeId: value || undefined })} />{siteVideo && videoInput?.lastFrameRequiresFirst && !firstFrameValue ? <p className="mt-1 text-[11px] opacity-65">请先选择首帧</p> : null}</div> : null}
                         </div>
                     </CanvasSettingGroup>
                 ) : null}

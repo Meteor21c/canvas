@@ -52,6 +52,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     const resolutions = data?.available ? data.resolutions.map(value => normalizeVideoResolutionValue(value).toLowerCase()) : [];
     const resolution = normalizeVideoResolutionValue(config.vquality).toLowerCase();
     const duration = data?.duration;
+    const aspectRatios = data?.aspectRatios?.length ? data.aspectRatios : ["16:9", "9:16", "1:1"];
     useEffect(() => {
         if (!data?.available || !duration) return;
         if (resolutions.length && !resolutions.includes(resolution)) {
@@ -70,7 +71,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                     <div className="flex flex-wrap gap-2">{resolutions.map(value => <OptionPill key={value} selected={resolution === value} theme={theme} onClick={() => { onConfigChange("vquality", value); onConfigChange("size", videoSizeForResolution(value, config.size)); }}>{videoResolutionLabel(value).toUpperCase()}</OptionPill>)}</div>
                 </SettingGroup>
                 <SettingGroup title="画面比例" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2">{["16:9", "9:16", "1:1"].map(ratio => <OptionPill key={ratio} selected={normalizeSeedanceRatio(config.size) === ratio} theme={theme} onClick={() => onConfigChange("size", seedancePixelLabel(resolution, ratio))}>{ratio}</OptionPill>)}</div>
+                    <div className="grid grid-cols-3 gap-2">{aspectRatios.map(ratio => <OptionPill key={ratio} selected={normalizeSeedanceRatio(config.size) === ratio} theme={theme} onClick={() => onConfigChange("size", ratio === "adaptive" ? "adaptive" : seedancePixelLabel(resolution, ratio))}>{ratio === "adaptive" ? "素材比例" : ratio}</OptionPill>)}</div>
                 </SettingGroup>
                 {!visualOnly ? <SettingGroup title={`时长 · ${duration.min}–${duration.max} 秒`} color={theme.node.muted}>
                     <VideoDurationControl value={config.videoSeconds} bounds={duration} onChange={value => onConfigChange("videoSeconds", value)} />

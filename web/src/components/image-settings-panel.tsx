@@ -1,10 +1,12 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
+import { useMeteorCapabilities } from "@/hooks/use-meteor-pricing";
+import { imageAspectRatio, imageResolutionOptions, imageResolutionSelection, imageSizeAllowed, imageSizeTier, normalizeImageResolution, resolveImageRequestSize } from "@/lib/image-resolution";
 
 const qualityOptions = [
     { value: "auto", label: "自动" },
@@ -23,24 +25,16 @@ const aspectOptions = [
     { value: "16:9", label: "16:9", width: 1920, height: 1080, icon: "landscape" },
     { value: "9:16", label: "9:16", width: 1080, height: 1920, icon: "portrait" },
     { value: "21:9", label: "21:9", width: 1568, height: 672, icon: "landscape" },
-    { value: "1:1-2k", label: "1:1(2k)", size: "2048x2048", width: 2048, height: 2048, icon: "square" },
-    { value: "16:9-2k", label: "16:9(2k)", size: "2048x1152", width: 2048, height: 1152, icon: "landscape" },
-    { value: "9:16-2k", label: "9:16(2k)", size: "1152x2048", width: 1152, height: 2048, icon: "portrait" },
-    { value: "21:9-2k", label: "21:9(2k)", size: "3136x1344", width: 3136, height: 1344, icon: "landscape" },
-    { value: "16:9-4k", label: "16:9(4k)", size: "3840x2160", width: 3840, height: 2160, icon: "landscape" },
-    { value: "9:16-4k", label: "9:16(4k)", size: "2160x3840", width: 2160, height: 3840, icon: "portrait" },
-    { value: "21:9-4k", label: "21:9(4k)", size: "6272x2688", width: 6272, height: 2688, icon: "landscape" },
-    { value: "auto", label: "auto", width: 0, height: 0, icon: "auto" },
 ];
 
 export const imageSizeOptions = aspectOptions.map((item) => ({
-    value: item.size || item.value,
+    value: item.value,
     label: item.label,
 }));
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "imageResolution" | "size" | "count", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     showSize?: boolean;
@@ -55,11 +49,27 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(4, maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
-    const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
+    const resolution = imageSizeTier(activeSize) || normalizeImageResolution(config.imageResolution);
+    const capabilities = useMeteorCapabilities({ kind: "image", model: config.model, channelId: config.imageChannelId || config.activeChannelId });
+    const resolutions = imageResolutionOptions.filter(option => capabilities.data?.resolutions.some(value => value.toLowerCase() === option.value));
+    const selectedAspect = aspectOptions.find(item => item.value === imageAspectRatio(activeSize));
+    const dimensions = readSizeDimensions(resolveImageRequestSize(resolution, activeSize) || "", selectedAspect || aspectOptions[0]);
+    const selectResolution = (value: string) => {
+        const selection = imageResolutionSelection(config.model, value, activeSize);
+        onConfigChange("imageResolution", selection.imageResolution);
+        onConfigChange("size", selection.size);
+    };
+    useEffect(() => {
+        if (resolutions.length && !resolutions.some(option => option.value === resolution)) selectResolution(resolutions[0].value);
+    }, [capabilities.data, resolution]);
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
-        onConfigChange("size", option?.size || option?.value || "auto");
+        if (!imageSizeAllowed(config.model, resolveImageRequestSize(resolution, value))) {
+            const supported = resolutions.find(tier => imageSizeAllowed(config.model, resolveImageRequestSize(tier.value, value)));
+            if (!supported) return;
+            onConfigChange("imageResolution", supported.value);
+        }
+        onConfigChange("size", option?.value || "1:1");
     };
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
@@ -93,6 +103,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {showSize ? (
                     <>
                         <div className="space-y-2.5">
+                            <SettingTitle color={theme.node.muted}>分辨率</SettingTitle>
+                            <div className="grid grid-cols-3 gap-2.5">
+                                {(resolutions.length ? resolutions : imageResolutionOptions.filter(option => option.value === resolution)).map(option => <OptionPill key={option.value} selected={resolution === option.value} theme={theme} onClick={() => selectResolution(option.value)}>{option.label}</OptionPill>)}
+                            </div>
+                        </div>
+                        <div className="space-y-2.5">
                             <div className="flex items-center justify-between gap-3">
                                 <SettingTitle color={theme.node.muted}>尺寸</SettingTitle>
                                 <div className="flex items-center gap-2">
@@ -109,6 +125,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 <span className="text-lg opacity-45">↔</span>
                                 <DimensionInput prefix="H" value={dimensions.height} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("height", value)} />
                             </div>
+                            {!imageSizeAllowed(config.model, resolveImageRequestSize(resolution, activeSize)) ? <p role="alert" className="text-xs text-red-500">当前模型不支持该尺寸，请调整分辨率或宽高。</p> : null}
                         </div>
                         <div className="space-y-2.5">
                             <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
@@ -117,7 +134,8 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                     <button
                                         key={item.value}
                                         type="button"
-                                        className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
+                                        className="flex h-[58px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-xs transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-30"
+                                        disabled={!imageSizeAllowed(config.model, resolveImageRequestSize(resolution, item.value)) && !resolutions.some(tier => imageSizeAllowed(config.model, resolveImageRequestSize(tier.value, item.value)))}
                                         style={{ borderColor: selectedAspect?.value === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
                                         onMouseDown={(event) => event.stopPropagation()}
                                         onClick={() => selectAspect(item.value)}
@@ -165,7 +183,7 @@ export function imageQualityLabel(value: string) {
 }
 
 export function imageSizeLabel(size: string) {
-    return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
+    return aspectOptions.find((item) => item.value === size)?.label || size;
 }
 
 function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {

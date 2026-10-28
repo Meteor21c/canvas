@@ -3,6 +3,7 @@ import { executeParameterTranslation, findParameterTranslation, normalizeTransla
 
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
 import { dataUrlToFile } from "@/lib/image-utils";
+import { imageSizeAllowed, normalizeImageResolution, resolveImageRequestSize } from "@/lib/image-resolution";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { isMimoChannel, mimoModels } from "@/lib/mimo-tts";
 import { modelChannelAttributionHeaders } from "@/lib/model-channel";
@@ -100,18 +101,7 @@ type ImageRequestParams = {
     signal?: AbortSignal;
 };
 
-const QUALITY_BASE: Record<string, number> = {
-    low: 1024,
-    medium: 2048,
-    high: 2880,
-    standard: 1024,
-    hd: 2048,
-};
-const QUALITY_ALIASES: Record<string, string> = {
-    "1k": "low",
-    "2k": "medium",
-    "4k": "high",
-};
+const IMAGE_QUALITIES = new Set(["low", "medium", "high", "standard", "hd"]);
 const IMAGE_MIME = "image/png";
 const IMAGE_REQUEST_TIMEOUT_SECONDS = 600;
 const PROMPT_REWRITE_GUARD_PREFIX = "Use the following text as the complete prompt. Do not rewrite it:";
@@ -119,8 +109,7 @@ const PROMPT_REWRITE_GUARD_PREFIX = "Use the following text as the complete prom
 export function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
     if (!value || value === "auto") return "auto";
-    const normalized = QUALITY_ALIASES[value] || value;
-    return QUALITY_BASE[normalized] ? normalized : "auto";
+    return IMAGE_QUALITIES.has(value) ? value : "auto";
 }
 
 function normalizeBoundedInteger(value: string | number, fallback: number, min: number, max: number) {
@@ -140,38 +129,18 @@ function greatestCommonDivisor(a: number, b: number) {
     return a;
 }
 
-function resolveSize(quality: string, ratio: string): string | undefined {
-    const basePixels = QUALITY_BASE[quality];
-    if (!basePixels || ratio === "auto" || !ratio) return undefined;
-
-    const parts = ratio.split(":");
-    if (parts.length !== 2) return undefined;
-    const w = Number(parts[0]);
-    const h = Number(parts[1]);
-    if (!w || !h) return undefined;
-
-    const a = greatestCommonDivisor(w, h);
-
-    const unit = Math.round(Math.sqrt((basePixels * basePixels) / ((w / a) * (h / a))) / 16) * 16;
-    return `${(w / a) * unit}x${(h / a) * unit}`;
-}
-
-export function resolveRequestSize(quality: string | undefined, size: string) {
-    const value = size.trim();
-    if (!value || value === "auto") return undefined;
-    if (/^\d+x\d+$/.test(value)) return value;
-    // 用户只选了宽高比时,即使 quality=auto 也要折算成具体像素尺寸,避免 "1:1" 这种非法值发到 API。
-    return resolveSize(quality && QUALITY_BASE[quality] ? quality : "low", value);
-}
+export const resolveRequestSize = resolveImageRequestSize;
 
 function createImageRequestParams(config: AiConfig): ImageRequestParams {
     const normalizedQuality = normalizeQuality(config.quality);
     const zhipu = isZhipuImageModel(config.model);
     const quality = zhipu ? normalizeZhipuImageQuality(config.model, normalizedQuality) : normalizedQuality;
+    const size = resolveRequestSize(config.imageResolution, config.size);
+    if (!imageSizeAllowed(config.model, size)) throw new ImageRequestError("当前尺寸不受此模型支持，请调整分辨率或画面比例");
     return {
         n: normalizeBoundedInteger(config.count, 1, 1, 4),
         quality,
-        size: resolveRequestSize(quality, config.size),
+        size,
         timeoutSeconds: IMAGE_REQUEST_TIMEOUT_SECONDS,
         streamPartialImages: normalizeBoundedInteger(config.streamPartialImages, 1, 0, 3),
     };
@@ -219,9 +188,7 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
                 body.aspect_ratio = size;
             }
         }
-        if (params.quality !== "auto") {
-            body.resolution = operation === "edit" && model.includes("edit") ? "1k" : QUALITY_BASE[params.quality] > 1024 ? "2k" : "1k";
-        }
+        body.resolution = operation === "edit" && model.includes("edit") ? "1k" : normalizeImageResolution(config.imageResolution) === "1k" ? "1k" : "2k";
         return;
     }
 
@@ -854,7 +821,7 @@ function createResponsesInput(config: AiConfig, prompt: string, inputImageDataUr
 }
 
 function createChatImageBody(config: AiConfig, prompt: string, inputImageDataUrls: string[], params: ImageRequestParams) {
-    const image = geminiImageSettings(config.model, config.quality, config.size, params.size);
+    const image = geminiImageSettings(config.model, config.imageResolution, config.size, params.size);
     const imageConfig = {
         ...(image.aspectRatio ? { aspect_ratio: image.aspectRatio } : {}),
         ...(image.imageSize ? { image_size: image.imageSize } : {}),
@@ -1323,7 +1290,7 @@ async function requestGeminiImageSingle(config: AiConfig, prompt: string, refere
 }
 
 async function createGeminiImageBody(config: AiConfig, prompt: string, references: ReferenceImage[], params: ImageRequestParams) {
-    const image = geminiImageSettings(config.model, config.quality, config.size, params.size);
+    const image = geminiImageSettings(config.model, config.imageResolution, config.size, params.size);
     const parts: Array<Record<string, unknown>> = [{ text: withPromptGuard(config, prompt) }];
     const dataUrls = await Promise.all(references.map(imageToDataUrl));
     parts.push(...dataUrls.map(dataUrlToGeminiInlineData));
@@ -1336,11 +1303,9 @@ async function createGeminiImageBody(config: AiConfig, prompt: string, reference
     };
 }
 
-function geminiImageSettings(model: string, quality: string, size: string, resolvedSize?: string) {
+function geminiImageSettings(model: string, resolution: string, size: string, resolvedSize?: string) {
     const aspectRatio = normalizeGeminiImageRatio(size);
-    const normalizedQuality = quality.trim().toLowerCase();
-    const preset = `${size} ${resolvedSize || ""}`.toLowerCase();
-    const imageSize = normalizedQuality === "low" ? "1K" : normalizedQuality === "medium" ? "2K" : normalizedQuality === "high" ? "4K" : preset.includes("6272x2688") || preset.includes("3840x2160") || preset.includes("2160x3840") ? "4K" : preset.includes("2048x") || preset.includes("3136x1344") ? "2K" : "";
+    const imageSize = normalizeImageResolution(resolution).toUpperCase();
     return {
         ...(aspectRatio ? { aspectRatio } : {}),
         ...(!model.toLowerCase().includes("2.5") && imageSize ? { imageSize } : {}),

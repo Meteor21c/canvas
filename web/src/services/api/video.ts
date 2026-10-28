@@ -20,6 +20,9 @@ import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directA
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { fetchMeteorCapabilities } from "./meteor-pricing";
+import { pricingInputFromConfig } from "@/lib/meteor-pricing";
+import { videoInputError } from "@/lib/meteor-video-input";
 
 export type VideoResponse = { parameter_translation?: boolean; translationSnapshot?: LocalVideoTranslationSnapshot; id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; workflowRef?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | VideoResponse[] | null; msg?: string; message?: string };
@@ -119,9 +122,17 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] | VideoReferenceInput = [], onProgress?: VideoProgressHandler, options?: string | VideoTaskCreateOptions): Promise<CreatedVideoGenerationTask> {
     const model = config.model || config.videoModel;
     const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
+    const normalizedInput = normalizeVideoReferenceInput(references);
+    if (usesAccountProxy(config)) {
+        const pricing = pricingInputFromConfig(config, "video", { model });
+        const caps = await fetchMeteorCapabilities({ kind: "video", model, channelId: pricing.channelId }, useUserStore.getState().token || "");
+        if (!caps.available) throw new VideoRequestError("当前模型暂不可用，请重新选择模型");
+        const error = videoInputError(caps, normalizedInput, boolConfig(config.videoGenerateAudio, false));
+        if (error) throw new VideoRequestError(error);
+    }
     const translation = await findParameterTranslation({...config,model});
-    if (translation) return createTranslatedVideoTask({...config,model},translation,systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,normalizeVideoReferenceInput(references),normalizeVideoTaskCreateOptions(options),onProgress);
-    const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, normalizeVideoReferenceInput(references));
+    if (translation) return createTranslatedVideoTask({...config,model},translation,systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,normalizedInput,normalizeVideoTaskCreateOptions(options),onProgress);
+    const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, normalizedInput);
     const startedAt = Date.now();
     try {
         const createOptions = normalizeVideoTaskCreateOptions(options);
@@ -432,7 +443,7 @@ export async function createVideoRequestBody(config: AiConfig, model: string, pr
             model, prompt,
             duration: Number(config.videoSeconds),
             resolution: normalizeVideoResolution(config.vquality),
-            aspect_ratio: normalizeSeedanceRatio(config.size),
+            aspect_ratio: model === "doubao-seedance-2.5" && input.firstFrame ? "adaptive" : normalizeSeedanceRatio(config.size),
             mode: config.videoMode,
             audio: boolConfig(config.videoGenerateAudio, false),
             watermark: false,

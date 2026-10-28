@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { isKIESeedreamLayerDecompositionModel } from "@/lib/kie-models";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { imageSizeTier, normalizeImageResolution } from "@/lib/image-resolution";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
@@ -74,7 +75,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
                     <span className="truncate">
                         {effectiveShowSize ? (
                             <>
-                                {imageQualityLabel(quality)} · {imageSizeLabel(activeSize)}
+                                {(imageSizeTier(activeSize) || normalizeImageResolution(config.imageResolution)).toUpperCase()} · {imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}
                                 {effectiveShowCount ? <> · {count} 张</> : null}
                             </>
                         ) : (
@@ -110,19 +111,22 @@ function ImageSettingsPortal({
     showSize: boolean;
     showCount: boolean;
 }) {
-    const width = 356;
+    const width = Math.min(356, window.innerWidth - 24);
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
     const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
-    const topPlacement = placement?.startsWith("top");
+    const above = buttonRect.top - gap - margin;
+    const below = window.innerHeight - buttonRect.bottom - gap - margin;
+    const topPlacement = placement?.startsWith("top") ? above >= Math.min(460, below) : above > below && below < 260;
+    const maxHeight = Math.max(80, Math.min(window.innerHeight - margin * 2, topPlacement ? above : below));
     const style = {
         position: "fixed",
         zIndex: 1200,
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
-        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
+        ...(topPlacement ? { bottom: Math.max(margin, Math.min(window.innerHeight - margin - maxHeight, window.innerHeight - buttonRect.top + gap)), maxHeight } : { top: Math.max(margin, Math.min(window.innerHeight - margin - maxHeight, buttonRect.bottom + gap)), maxHeight }),
         background: theme.toolbar.panel,
         borderRadius: 18,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",

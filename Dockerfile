@@ -29,6 +29,7 @@ COPY main.go ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /server .
 
 FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg
 WORKDIR /app
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.source="https://github.com/Meteor21c/canvas"

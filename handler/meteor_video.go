@@ -22,113 +22,222 @@ import (
 
 func meteorVideoBody(raw []byte) ([]byte, error) {
 	var input map[string]any
-	if json.Unmarshal(raw, &input) != nil {
+	if json.Unmarshal(raw, &input) != nil || input == nil {
 		return nil, errors.New("视频请求必须是JSON")
 	}
 	if err := meteorValidateValues(input, 1); err != nil {
 		return nil, err
 	}
+	for _, field := range []string{"draft_task_id", "omni_reference_task_type", "content", "elements", "element_list", "video_list", "image_list"} {
+		if value, ok := input[field]; ok && value != nil {
+			return nil, errors.New("当前画布暂不支持此视频参数：" + field)
+		}
+	}
+	if value, ok := input["draft"]; ok && value != false && value != nil {
+		return nil, errors.New("当前画布暂不支持样片模式")
+	}
 	out := map[string]any{}
-	for _, field := range []string{"model", "prompt", "duration", "resolution", "aspect_ratio", "mode", "audio", "reference_images", "start_image_url", "end_image_url"} {
-		if value, ok := input[field]; ok {
+	for _, field := range []string{"model", "prompt", "resolution", "aspect_ratio", "mode", "audio"} {
+		if value, ok := input[field]; ok && value != nil {
 			out[field] = value
 		}
 	}
-	if out["duration"] == nil {
-		out["duration"] = input["seconds"]
-	}
-	if value, ok := out["duration"].(string); ok {
-		if duration, err := strconv.Atoi(value); err == nil {
-			out["duration"] = duration
+	textAlias := func(names ...string) (string, error) {
+		result := ""
+		for _, name := range names {
+			value, ok := input[name]
+			if !ok || value == nil {
+				continue
+			}
+			text, ok := value.(string)
+			if !ok {
+				return "", errors.New("视频参数须为文本：" + name)
+			}
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			if result != "" && result != text {
+				return "", errors.New("视频输入参数重复且不一致：" + name)
+			}
+			result = text
 		}
+		return result, nil
 	}
-	if out["duration"] == nil {
-		out["duration"] = 5
+	var err error
+	if out["model"], err = textAlias("model"); err != nil {
+		return nil, err
 	}
-	duration, err := strconv.ParseFloat(toMeteorString(out["duration"]), 64)
-	if err != nil || duration != float64(int(duration)) {
-		return nil, errors.New("视频时长须为整数秒")
+	if out["prompt"], err = textAlias("prompt"); err != nil {
+		return nil, err
 	}
-	out["duration"] = int(duration)
-	if out["audio"] == nil {
-		out["audio"] = false
+	if out["resolution"], err = textAlias("resolution", "resolution_name", "quality", "vquality"); err != nil {
+		return nil, err
 	}
-	if _, ok := out["audio"].(bool); !ok {
-		return nil, errors.New("视频音频参数无效")
+	if out["resolution"] == "" {
+		out["resolution"] = "720p"
 	}
-	if out["resolution"] == nil {
-		out["resolution"] = firstNonEmpty(readStringPath(input, "resolution_name"), readStringPath(input, "quality"), readStringPath(input, "vquality"), "720p")
+	if out["aspect_ratio"], err = textAlias("aspect_ratio", "ratio"); err != nil {
+		return nil, err
 	}
-	if out["aspect_ratio"] == nil {
+	if out["aspect_ratio"] == "" {
 		if size := readStringPath(input, "size"); strings.Contains(size, ":") {
 			out["aspect_ratio"] = size
 		}
 	}
-	if out["reference_images"] == nil {
-		if value, ok := input["references"]; ok {
-			out["reference_images"] = value
-		}
-	}
-	if out["start_image_url"] == nil {
-		if value, ok := input["first_frame"]; ok {
-			out["start_image_url"] = value
-		}
-	}
-	if out["end_image_url"] == nil {
-		if value, ok := input["last_frame"]; ok {
-			out["end_image_url"] = value
-		}
-	}
 
-	if out["resolution"] == nil {
-		out["resolution"] = input["resolution_name"]
-	}
-	if out["reference_images"] == nil {
-		for _, field := range []string{"input_reference[]", "input_reference", "images"} {
-			if value, ok := input[field]; ok {
-				out["reference_images"] = value
-				break
-			}
+	if input["duration"] != nil && input["seconds"] != nil {
+		left, e1 := strconv.ParseFloat(toMeteorString(input["duration"]), 64)
+		right, e2 := strconv.ParseFloat(toMeteorString(input["seconds"]), 64)
+		if e1 != nil || e2 != nil || left != right {
+			return nil, errors.New("视频时长参数重复且不一致")
 		}
 	}
-	if out["start_image_url"] == nil {
-		out["start_image_url"] = input["first_frame_url"]
+	durationValue := input["duration"]
+	if durationValue == nil {
+		durationValue = input["seconds"]
 	}
-	if out["end_image_url"] == nil {
-		out["end_image_url"] = input["last_frame_url"]
+	if durationValue == nil {
+		durationValue = 5
 	}
-	refs := []any{}
-	appendRefs := func(value any, prefix string) {
+	duration, err := strconv.ParseFloat(toMeteorString(durationValue), 64)
+	if err != nil || duration != float64(int(duration)) {
+		return nil, errors.New("视频时长须为整数秒")
+	}
+	out["duration"] = int(duration)
+
+	if input["audio"] != nil && input["generate_audio"] != nil {
+		left, ok1 := input["audio"].(bool)
+		right, ok2 := input["generate_audio"].(bool)
+		if !ok1 || !ok2 || left != right {
+			return nil, errors.New("生成音频参数重复且不一致")
+		}
+	}
+	audio := out["audio"]
+	if audio == nil {
+		audio = input["generate_audio"]
+	}
+	if audio == nil {
+		audio = false
+	}
+	if _, ok := audio.(bool); !ok {
+		return nil, errors.New("视频音频参数无效")
+	}
+	out["audio"] = audio
+	first, err := textAlias("start_image_url", "first_frame", "first_frame_url")
+	if err != nil {
+		return nil, err
+	}
+	last, err := textAlias("end_image_url", "last_frame", "last_frame_url")
+	if err != nil {
+		return nil, err
+	}
+	refs := []string{}
+	appendRefs := func(value any, prefix string) error {
+		if value == nil {
+			return nil
+		}
 		if single, ok := value.(string); ok {
+			if strings.TrimSpace(single) == "" {
+				return nil
+			}
 			value = []any{single}
 		}
-		if values, ok := value.([]any); ok {
-			for _, item := range values {
-				if entry, ok := item.(map[string]any); ok {
-					item = firstNonEmpty(readStringPath(entry, "url"), readStringPath(entry, "image_url"))
+		values, ok := value.([]any)
+		if !ok {
+			return errors.New("参考素材参数须为地址列表")
+		}
+		for _, item := range values {
+			if entry, ok := item.(map[string]any); ok {
+				item = entry["url"]
+				if item == nil {
+					item = entry["image_url"]
 				}
-				if text, ok := item.(string); ok && text != "" {
-					refs = append(refs, prefix+text)
+				if nested, ok := item.(map[string]any); ok {
+					item = nested["url"]
 				}
 			}
+			text, ok := item.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return errors.New("参考素材地址无效，不会自动忽略")
+			}
+			text = strings.TrimSpace(text)
+			if prefix != "" {
+				if strings.HasPrefix(strings.ToLower(text), prefix) {
+					text = text[len(prefix):]
+				}
+				if kind := service.MeteorReferenceType(text); kind != "image" {
+					return errors.New("参考素材类型与字段不一致")
+				}
+			}
+			refs = append(refs, prefix+text)
+		}
+		return nil
+	}
+	for _, field := range []string{"reference_images", "references", "input_reference[]", "input_reference", "images"} {
+		if err = appendRefs(input[field], ""); err != nil {
+			return nil, err
 		}
 	}
-	appendRefs(out["reference_images"], "")
-	appendRefs(input["reference_videos"], "video:")
-	appendRefs(input["reference_audios"], "audio:")
-	appendRefs(input["video_reference[]"], "video:")
-	appendRefs(input["audio_reference[]"], "audio:")
+	for _, field := range []string{"reference_videos", "video_reference[]"} {
+		if err = appendRefs(input[field], "video:"); err != nil {
+			return nil, err
+		}
+	}
+	for _, field := range []string{"reference_audios", "audio_reference[]"} {
+		if err = appendRefs(input[field], "audio:"); err != nil {
+			return nil, err
+		}
+	}
+	if len(refs)+meteorReferenceCount(first)+meteorReferenceCount(last) > 4 {
+		return nil, errors.New("视频参考素材最多4个")
+	}
+	if readStringPath(out, "model") == "doubao-seedance-2.5" && first != "" && out["aspect_ratio"] == "" {
+		out["aspect_ratio"] = "adaptive"
+	}
+	materials := service.MeteorVideoMaterials{Model: readStringPath(out, "model"), Prompt: readStringPath(out, "prompt"), AspectRatio: readStringPath(out, "aspect_ratio"), Audio: audio.(bool), FirstFrame: first, LastFrame: last, References: refs}
+	if err = service.MeteorValidateVideoInput(materials); err != nil {
+		return nil, err
+	}
 	if len(refs) > 0 {
 		out["reference_images"] = refs
 	}
-	referenceCount := len(refs) + meteorReferenceCount(out["start_image_url"]) + meteorReferenceCount(out["end_image_url"])
-	if referenceCount > 4 {
-		return nil, errors.New("视频参考素材最多4个")
+	if first != "" {
+		out["start_image_url"] = first
+	}
+	if last != "" {
+		out["end_image_url"] = last
 	}
 	out["watermark"] = false
-
-	// Main gateway supplies the existing asset-library review and billing queue.
 	return json.Marshal(out)
+}
+
+func meteorPrepareVideoBody(ctx context.Context, input map[string]any) ([]byte, error) {
+	refs := []string{}
+	if values, ok := input["reference_images"].([]any); ok {
+		for _, entry := range values {
+			value, ok := entry.(string)
+			if !ok {
+				return nil, errors.New("参考素材地址无效")
+			}
+			refs = append(refs, value)
+		}
+	}
+	audio, _ := input["audio"].(bool)
+	materials, err := service.MeteorPrepareVideoMaterials(ctx, service.MeteorVideoMaterials{Model: readStringPath(input, "model"), Prompt: readStringPath(input, "prompt"), AspectRatio: readStringPath(input, "aspect_ratio"), Audio: audio, FirstFrame: readStringPath(input, "start_image_url"), LastFrame: readStringPath(input, "end_image_url"), References: refs})
+	if err != nil {
+		return nil, err
+	}
+	if len(materials.References) > 0 {
+		input["reference_images"] = materials.References
+	}
+	if materials.FirstFrame != "" {
+		input["start_image_url"] = materials.FirstFrame
+	}
+	if materials.LastFrame != "" {
+		input["end_image_url"] = materials.LastFrame
+	}
+	return json.Marshal(input)
 }
 
 func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +263,7 @@ func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := meteorVideoBody(raw)
 	if err != nil {
-		Fail(w, err.Error())
+		FailWithStatus(w, 400, err.Error())
 		return
 	}
 	var input map[string]any
@@ -169,6 +278,11 @@ func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
 	audio, _ := input["audio"].(bool)
 	inputVideo := meteorVideoReference(input["reference_images"]) || meteorVideoReference(input["start_image_url"]) || meteorVideoReference(input["end_image_url"])
 	if err := service.ValidateMeteorVideo(r.Context(), user.ID, channel.ID, modelName, duration, readStringPath(input, "resolution"), audio, inputVideo); err != nil {
+		FailWithStatus(w, 400, err.Error())
+		return
+	}
+	body, err = meteorPrepareVideoBody(r.Context(), input)
+	if err != nil {
 		FailWithStatus(w, 400, err.Error())
 		return
 	}

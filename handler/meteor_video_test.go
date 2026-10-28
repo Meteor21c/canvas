@@ -8,10 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tigerowo/infinite-canvas/config"
@@ -67,7 +70,7 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 	}))
 	defer server.Close()
 	previous := config.Cfg
-	config.Cfg = config.Config{MeteorMode: true, MeteorAPIBase: server.URL, StorageDriver: "sqlite", DatabaseDSN: ":memory:", JWTSecret: "fixture-only"}
+	config.Cfg = config.Config{MeteorMode: true, MeteorAPIBase: server.URL, StorageDriver: "sqlite", DatabaseDSN: filepath.Join(t.TempDir(), "fixture.db"), JWTSecret: "fixture-only"}
 	t.Cleanup(func() { config.Cfg = previous })
 	user, err := service.MeteorAuthenticate(context.Background(), "fake-owner-token")
 	if err != nil {
@@ -82,7 +85,49 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 		t.Fatal("public catalogue exposed gateway secrets")
 	}
 	id := "client_video_task_ci_" + uuid.NewString()
-	body := []byte(`{"model":"doubao-seedance-2.5","prompt":"no actual generation","seconds":"30","resolution_name":"1080p","size":"16:9","reference_videos":["https://owned.example/reference.mp4"],"reference_audios":["https://owned.example/reference.mp3"],"first_frame_url":"https://owned.example/start.png","last_frame_url":"https://owned.example/end.png","audio":true}`)
+	mediaDir := filepath.Join(filepath.Dir(config.Cfg.DatabaseDSN), "meteor-media")
+	if err := os.MkdirAll(mediaDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ownedRefs := []string{}
+	for _, mimeType := range []string{"video/mp4", "audio/mpeg"} {
+		fileID := uuid.NewString()
+		object := model.StorageObject{ID: fileID, ObjectKey: fileID, ProviderID: "meteor-local", CreatedBy: user.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), MimeType: mimeType, Bytes: 3, Width: 16, Height: 16, DurationSeconds: 3, MetadataVerified: true}
+		if _, err := repository.SaveStorageObject(object); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mediaDir, fileID), []byte("raw"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		ownedRefs = append(ownedRefs, "https://api.meteor21c.fun"+service.MeteorMediaURL(fileID))
+	}
+	body, _ := json.Marshal(map[string]any{"model": "doubao-seedance-2.5", "prompt": "no actual generation", "seconds": "30", "resolution_name": "1080p", "size": "16:9", "reference_videos": []string{ownedRefs[0]}, "reference_audios": []string{ownedRefs[1]}, "audio": true})
+
+	for name, invalid := range map[string]string{
+		"frames_and_reference":   `{"model":"doubao-seedance-2.5","first_frame":"https://example.com/a.png","reference_images":["https://example.com/b.png"]}`,
+		"invalid_reference":      `{"model":"doubao-seedance-2.5","reference_images":[{"unknown":"ignored-before"}]}`,
+		"tail_only":              `{"model":"doubao-seedance-2.5","last_frame":"https://example.com/a.png"}`,
+		"private_url":            `{"model":"doubao-seedance-2.5","duration":5,"resolution":"1080p","audio":true,"reference_videos":["http://127.0.0.1/private.mp4"]}`,
+		"unsupported_resolution": `{"model":"doubao-seedance-2.5","prompt":"fixture","resolution":"4K"}`,
+	} {
+		badID := "client-invalid-" + name + uuid.NewString()
+		req := httptest.NewRequest("POST", "/api/v1/videos", strings.NewReader(invalid))
+		req = req.WithContext(service.WithUser(req.Context(), user))
+		req.Header.Set("X-Model-Channel-ID", "meteor-key-7-video")
+		req.Header.Set("X-Client-Video-Task-ID", badID)
+		recorder := httptest.NewRecorder()
+		meteorCreateVideo(recorder, req)
+		var payload response
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil || payload.Code == 0 {
+			t.Fatalf("invalid %s accepted: %s", name, recorder.Body.String())
+		}
+		db, _ := repository.DB()
+		var receipts int64
+		_ = db.Model(&model.MeteorTaskReceipt{}).Where("id = ?", badID).Count(&receipts).Error
+		if submits.Load() != 0 || receipts != 0 {
+			t.Fatalf("invalid %s reached paid task or claimed id", name)
+		}
+	}
 	call := func() string {
 		r := httptest.NewRequest("POST", "/api/v1/videos", bytes.NewReader(body))
 		r = r.WithContext(service.WithUser(r.Context(), user))
@@ -118,7 +163,7 @@ func TestMeteorVideoUsesMainProtocolAndNeverReplays(t *testing.T) {
 	first := accepted["start_image_url"]
 	last := accepted["end_image_url"]
 	acceptedMu.Unlock()
-	if duration != float64(30) || resolution != "1080p" || first != "https://owned.example/start.png" || last != "https://owned.example/end.png" || (!strings.Contains(fmt.Sprint(refs), "video:https://owned.example/reference.mp4") || !strings.Contains(fmt.Sprint(refs), "audio:https://owned.example/reference.mp3")) {
+	if duration != float64(30) || resolution != "1080p" || first != nil || last != nil || (!strings.Contains(fmt.Sprint(refs), "video:https://api.meteor21c.fun/studio/api/files/") || !strings.Contains(fmt.Sprint(refs), "audio:https://api.meteor21c.fun/studio/api/files/")) {
 		t.Fatalf("protocol silently changed capabilities: %+v", accepted)
 	}
 	task, found, err := service.GetUserVideoTask(user.ID, id)

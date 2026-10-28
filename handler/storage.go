@@ -59,7 +59,8 @@ func MeasureUserStorageProvider(w http.ResponseWriter, r *http.Request) {
 // UploadFile 上传文件到对象存储。
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	if service.MeteorEnabled() {
-		r.Body = http.MaxBytesReader(w, r.Body, service.MeteorMaxFileBytes+(1<<20))
+		meteorUploadFile(w, r)
+		return
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {

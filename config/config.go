@@ -12,6 +12,7 @@ import (
 )
 
 type Config struct {
+	MeteorPublicBase    string `env:"METEOR_PUBLIC_BASE" envDefault:"https://api.meteor21c.fun"`
 	MeteorMode          bool   `env:"METEOR_MODE" envDefault:"false"`
 	MeteorAPIBase       string `env:"METEOR_API_BASE" envDefault:"http://host.docker.internal:3000"`
 	Port                string `env:"PORT" envDefault:"8080"`

@@ -29,12 +29,15 @@ import (
 
 // UploadedStorageObject 上传存储对象返回结果。
 type UploadedStorageObject struct {
-	ExpiresAt  string `json:"expiresAt,omitempty"`
-	ID         string `json:"id"`
-	URL        string `json:"url"`
-	StorageKey string `json:"storageKey"`
-	Bytes      int64  `json:"bytes"`
-	MimeType   string `json:"mimeType"`
+	Width           int     `json:"width,omitempty"`
+	Height          int     `json:"height,omitempty"`
+	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+	ExpiresAt       string  `json:"expiresAt,omitempty"`
+	ID              string  `json:"id"`
+	URL             string  `json:"url"`
+	StorageKey      string  `json:"storageKey"`
+	Bytes           int64   `json:"bytes"`
+	MimeType        string  `json:"mimeType"`
 }
 
 type DirectStorageObjectInput struct {
@@ -271,6 +274,9 @@ func UploadStorageObjectWithProvider(ctx context.Context, filename string, conte
 
 // RegisterDirectStorageObject 登记浏览器已直传至用户 WebDAV 的对象。
 func RegisterDirectStorageObject(ctx context.Context, input DirectStorageObjectInput) (UploadedStorageObject, error) {
+	if MeteorEnabled() {
+		return UploadedStorageObject{}, errors.New("请通过本站上传素材")
+	}
 	user, ok := UserFromContext(ctx)
 	if !ok || user.ID == "" || user.Role == model.UserRoleGuest {
 		return UploadedStorageObject{}, errors.New("请先登录")

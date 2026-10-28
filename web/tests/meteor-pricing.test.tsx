@@ -27,10 +27,10 @@ test("unknown token cost never becomes a zero price or a per-image quote", () =>
 test("official-relative rate uses ratio semantics and current request parameters stay intact", () => {
     expect(formatOfficialRate("0.345")).toBe("0.345 × 官方价（3.45 折）");
     expect(formatOfficialRate(null)).toBe("");
-    const config = { ...defaultConfig, videoModel: "seedance-2.5", videoChannelId: "meteor-key-4-video", videoSeconds: "30", vquality: "4K", count: "4", quality: "2k", imageModel: "gpt-image-2", imageChannelId: "meteor-key-7", videoGenerateAudio: "true" };
+    const config = { ...defaultConfig, videoModel: "seedance-2.5", videoChannelId: "meteor-key-4-video", videoSeconds: "30", vquality: "4K", count: "4", quality: "medium", imageResolution: "2k", imageModel: "gpt-image-2", imageChannelId: "meteor-key-7", videoGenerateAudio: "true" };
     expect(pricingInputFromConfig(config, "video", { inputVideo: true })).toMatchObject({ model: "seedance-2.5", channelId: "meteor-key-4-video", duration: 30, resolution: "4k", count: 1, audio: true, inputVideo: true });
     expect(pricingInputFromConfig(config, "image", { count: 3 })).toMatchObject({ model: "gpt-image-2", channelId: "meteor-key-7", resolution: "2k", count: 3, audio: false, inputVideo: false });
-    expect(pricingInputFromConfig({ ...config, quality: "auto", size: "1:1" }, "image").size).toBe("1024x1024");
+    expect(pricingInputFromConfig({ ...config, quality: "auto", size: "1:1" }, "image").size).toBe("2048x2048");
     expect(pricingInputFromConfig({ ...config, quality: "low", size: "4096x4096" }, "image").size).toBe("4096x4096");
     expect(pricingInputFromConfig({ ...config, videoSeconds: "not-known" }, "video").duration).toBeUndefined();
 });

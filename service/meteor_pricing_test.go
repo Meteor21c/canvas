@@ -92,6 +92,11 @@ func TestMeteorImageTokenAndTierPricesRemainHonest(t *testing.T) {
 	if err != nil || !quote.Available || quote.BillingMode != "token" || quote.SiteUnitPrice == nil || *quote.SiteUnitPrice != "45" || *quote.TokenPrices["inputPerMillion"] != "7.5" {
 		t.Fatalf("token rate: %+v %v", quote, err)
 	}
+
+	capabilities, capErr := MeteorMediaCapabilities(context.Background(), user, "image", channel.ID, "gpt-image-2")
+	if capErr != nil || strings.Join(capabilities.Resolutions, ",") != "1K,2K,4K" {
+		t.Fatal("known image2 token model lost resolution capability", capabilities.Resolutions, capErr)
+	}
 	if quote.EstimatedAmount != nil || quote.PrechargeAmount != nil || quote.OfficialUnitPrice != nil || quote.SaleRateToOfficial != nil || quote.Exact {
 		t.Fatal("invented per-image total or mixed official text/image prices", quote)
 	}

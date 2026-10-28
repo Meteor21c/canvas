@@ -48,6 +48,7 @@ export type CanvasNodeMetadata = {
     channelId?: string;
     size?: string;
     quality?: string;
+    imageResolution?: string;
     count?: number;
     seconds?: string;
     vquality?: string;
@@ -216,6 +217,7 @@ export type CanvasAgentConfig = {
     textReasoningEnabled?: boolean;
     autoGenerateMedia: boolean;
     imageQuality: string;
+    imageResolution?: string;
     imageSize: string;
     videoQuality: string;
     videoSize: string;

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,58 +71,7 @@ func MeteorOwnsObject(ctx context.Context, id string) bool {
 }
 
 func meteorUpload(ctx context.Context, filename, contentType string, data []byte) (UploadedStorageObject, error) {
-	user, ok := UserFromContext(ctx)
-	if !ok || user.ID == "" {
-		return UploadedStorageObject{}, ErrMeteorSession
-	}
-	if len(data) == 0 || len(data) > MeteorMaxFileBytes {
-		return UploadedStorageObject{}, errors.New("素材不能超过64 MiB")
-	}
-	detected := http.DetectContentType(data)
-	mediaType, _, _ := mime.ParseMediaType(contentType)
-	if mediaType == "" {
-		mediaType = detected
-	}
-	if !meteorSafeMediaType(mediaType, detected, data) {
-		return UploadedStorageObject{}, errors.New("文件格式无效；只支持常见图片、视频和音频，不支持HTML或SVG")
-	}
-	meteorMediaMu.Lock()
-	defer meteorMediaMu.Unlock()
-	db, err := repository.DB()
-	if err != nil {
-		return UploadedStorageObject{}, err
-	}
-	var total, owner, ownerCount int64
-	if err = db.Model(&model.StorageObject{}).Where("provider_id = ?", "meteor-local").Select("COALESCE(SUM(bytes),0)").Scan(&total).Error; err != nil {
-		return UploadedStorageObject{}, err
-	}
-	if err = db.Model(&model.StorageObject{}).Where("provider_id = ? AND created_by = ?", "meteor-local", user.ID).Select("COALESCE(SUM(bytes),0)").Scan(&owner).Error; err != nil {
-		return UploadedStorageObject{}, err
-	}
-	if err = db.Model(&model.StorageObject{}).Where("provider_id = ? AND created_by = ?", "meteor-local", user.ID).Count(&ownerCount).Error; err != nil {
-		return UploadedStorageObject{}, err
-	}
-	if ownerCount >= meteorMediaOwnerMaxFiles {
-		return UploadedStorageObject{}, errors.New("最多保留256个临时素材，请等待清理或删除旧素材")
-	}
-	if total+int64(len(data)) > meteorMediaGlobalBytes || owner+int64(len(data)) > meteorMediaOwnerBytes {
-		return UploadedStorageObject{}, errors.New("临时素材额度已满，请等待清理或删除旧素材")
-	}
-	if err = os.MkdirAll(meteorMediaRoot(), 0700); err != nil {
-		return UploadedStorageObject{}, err
-	}
-	id := uuid.NewString()
-	path := filepath.Join(meteorMediaRoot(), id)
-	if err = os.WriteFile(path, data, 0600); err != nil {
-		return UploadedStorageObject{}, err
-	}
-	sum := sha256.Sum256(data)
-	object := model.StorageObject{ID: id, ProviderID: "meteor-local", ObjectKey: id, MimeType: mediaType, Bytes: int64(len(data)), SHA256: hex.EncodeToString(sum[:]), CreatedBy: user.ID, CreatedAt: now()}
-	if _, err = repository.SaveStorageObject(object); err != nil {
-		_ = os.Remove(path)
-		return UploadedStorageObject{}, err
-	}
-	return UploadedStorageObject{ID: id, StorageKey: "server:" + id, URL: MeteorMediaURL(id), Bytes: object.Bytes, MimeType: mediaType, ExpiresAt: MeteorExpiry(object.CreatedAt)}, nil
+	return meteorUploadStream(ctx, filename, contentType, bytes.NewReader(data), MeteorMaxFileBytes)
 }
 
 type meteorSectionReadCloser struct {
@@ -301,6 +250,9 @@ func meteorSafeMediaType(declared, detected string, data []byte) bool {
 	if detected == "video/mp4" && (declared == "audio/mp4" || declared == "video/quicktime") {
 		return true
 	}
+	if detected == "video/webm" && declared == "audio/webm" {
+		return true
+	} // probe verifies audio-only streams
 	if detected == "application/ogg" && declared == "audio/ogg" {
 		return true
 	}

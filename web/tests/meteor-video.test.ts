@@ -3,6 +3,10 @@ import * as images from "../src/services/image-storage";
 import * as media from "../src/services/file-storage";
 import * as requests from "../src/services/api/request";
 import { createVideoRequestBody, type VideoReferenceInput } from "../src/services/api/video";
+import { createVideoGenerationTask } from "../src/services/api/video";
+import * as pricing from "../src/services/api/meteor-pricing";
+import { useUserStore } from "../src/stores/use-user-store";
+import axios from "axios";
 import { defaultConfig, type AiConfig } from "../src/stores/use-config-store";
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -70,4 +74,23 @@ test("missing/unsynced references fail visibly rather than silently losing input
     spyOn(images, "imageToDataUrl").mockResolvedValue("data:image/png;base64,bW9jaw==");
     spyOn(images, "uploadImage").mockResolvedValue({ storageKey: "image:local-only" } as any);
     await expect(createVideoRequestBody(config, model, "mock", input({ references: [image("image:legacy")] }))).rejects.toThrow("参考图尚未同步到本站");
+});
+
+test("fresh capabilities reject mixed roles before translation, upload or a paid POST", async () => {
+    const originalToken = useUserStore.getState().token;
+    useUserStore.setState({ token: "mock-owner" });
+    spyOn(pricing, "fetchMeteorCapabilities").mockResolvedValue({ available: true, videoInput: { modes: ["text", "frames", "reference"], referenceTypes: ["image", "video", "audio"], firstFrame: true, lastFrame: true, lastFrameRequiresFirst: true, framesWithReferences: false, referenceLimits: { images: 4, videos: 3, audios: 3, total: 4 } } } as any);
+    const post = spyOn(axios, "post").mockRejectedValue(new Error("must not make a paid request"));
+    const upload = spyOn(images, "uploadImage").mockRejectedValue(new Error("must not upload"));
+    try {
+        await expect(createVideoGenerationTask(config, "mock", input({ firstFrame: image("server:first"), references: [image("server:ref")] }))).rejects.toThrow("其中一种");
+        expect(post).not.toHaveBeenCalled(); expect(upload).not.toHaveBeenCalled();
+    } finally { useUserStore.setState({ token: originalToken }); }
+});
+
+test("Seedance 2.5 first frame keeps its role and uses the required adaptive ratio", async () => {
+    const model = "doubao-seedance-2.5";
+    const body = await createVideoRequestBody({ ...config, model, videoModel: model, publicChannels: [{ id: "meteor-video", protocol: "sub2api", models: [model] }] }, model, "mock", input({ firstFrame: image("server:first") }));
+    expect(body).toMatchObject({ aspect_ratio: "adaptive", start_image_url: `${origin}/studio/api/files/first/content?expires=123&signature=mock` });
+    expect(body).not.toHaveProperty("reference_images");
 });

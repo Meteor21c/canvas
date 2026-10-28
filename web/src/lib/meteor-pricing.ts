@@ -1,5 +1,6 @@
 import { channelIdForActiveModel, type AiConfig } from "@/stores/use-config-store";
 import { normalizeQuality, resolveRequestSize } from "@/services/api/image";
+import { imageSizeTier, normalizeImageResolution } from "@/lib/image-resolution";
 import type { MeteorQuoteInput, PriceValue, PricingKind, PricingUnit } from "@/types/meteor-pricing";
 
 export type PricingSelection = { model?: string; channelId?: string; count?: number; inputVideo?: boolean };
@@ -7,18 +8,17 @@ export type PricingSelection = { model?: string; channelId?: string; count?: num
 export function pricingInputFromConfig(config: AiConfig, kind: PricingKind, selection: PricingSelection = {}): MeteorQuoteInput {
     const model = selection.model ?? (kind === "image" ? config.imageModel : config.videoModel);
     const channelId = selection.channelId ?? channelIdForActiveModel({ ...config, model });
-    const quality = config.quality.trim().toLowerCase();
-    const imageResolution = ({ low: "1k", standard: "1k", medium: "2k", hd: "2k", high: "4k" } as Record<string, string>)[quality] || quality;
     const videoQuality = config.vquality.trim().toLowerCase();
     const videoResolution = /^\d+$/.test(videoQuality) ? `${videoQuality}p` : videoQuality;
     const duration = Number(config.videoSeconds);
     const count = Number(selection.count ?? config.count);
-    const actualImageSize = resolveRequestSize(normalizeQuality(config.quality), config.size);
+    const actualImageSize = resolveRequestSize(config.imageResolution, config.size);
+    const imageResolution = imageSizeTier(actualImageSize) || normalizeImageResolution(config.imageResolution);
     return {
         kind, model, channelId,
         count: kind === "video" ? 1 : Number.isInteger(count) && count > 0 ? count : 1,
         resolution: kind === "video" ? videoResolution : imageResolution,
-        quality: config.quality,
+        quality: normalizeQuality(config.quality),
         size: kind === "image" ? actualImageSize || "auto" : config.size,
         ...(kind === "video" && Number.isInteger(duration) && duration > 0 ? { duration } : {}),
         audio: kind === "video" && config.videoGenerateAudio === "true",

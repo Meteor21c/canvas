@@ -38,6 +38,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/c
 import { ModelPicker } from "@/components/model-picker";
 import { PriceSummary } from "@/components/pricing/price-summary";
 import { useVideoCapabilities } from "@/hooks/use-meteor-pricing";
+import { assertReferenceFileSize, inspectReferenceFile, referenceAccept, REFERENCE_UPLOAD_NOTICE, videoInputError } from "@/lib/meteor-video-input";
 import { fetchMeteorCapabilities } from "@/services/api/meteor-pricing";
 import type { MeteorCapabilities } from "@/types/meteor-pricing";
 import { useAutoDLWorkflow } from "@/hooks/use-autodl-workflow";
@@ -219,14 +220,14 @@ export default function VideoPage() {
     const { data: autodlWorkflow, error: autodlError } = useAutoDLWorkflow(videoConfig, model);
     const autodlCapabilities = getAutoDLCapabilities(autodlWorkflow);
     const { data: videoCapabilities } = useVideoCapabilities(videoConfig, model);
-    const canGenerate = (Boolean(prompt.trim() || videoConfig.videoWorkflowRef) || (autodl && autodlCapabilities?.promptRequired === false)) && !videoCapabilityError(videoCapabilities, videoConfig);
+    const canGenerate = (Boolean(prompt.trim() || videoConfig.videoWorkflowRef) || (autodl && autodlCapabilities?.promptRequired === false)) && !videoCapabilityError(videoCapabilities, videoConfig) && !videoInputError(videoCapabilities, { references, firstFrame, lastFrame, videoReferences, audioReferences }, videoConfig.videoGenerateAudio === "true");
     const pendingCount = results.filter((item) => item.status === "pending").length;
     const klingWorkbench = videoConfig.videoWorkflowRef ? null : resolveKlingWorkbenchConfig(videoConfig, model);
     const isKlingWorkbench = Boolean(klingWorkbench);
     const klingOmni = videoConfig.videoWorkflowRef ? "" : kieKlingOmniVariant(videoConfig, model);
     const klingAcceptsVideoReferences = klingOmni === "reference-to-video" || klingOmni === "transformation";
-    const referenceImageLimit = klingOmni === "text-to-video" ? 0 : klingOmni === "image-to-video" ? 2 : klingOmni === "transformation" ? 4 : isKlingWorkbench && klingOmni !== "reference-to-video" ? 2 : referenceLimits.images;
-    const videoReferenceLimit = klingAcceptsVideoReferences ? 1 : referenceLimits.videos;
+    const referenceImageLimit = videoCapabilities?.videoInput?.referenceLimits.images ?? (klingOmni === "text-to-video" ? 0 : klingOmni === "image-to-video" ? 2 : klingOmni === "transformation" ? 4 : isKlingWorkbench && klingOmni !== "reference-to-video" ? 2 : referenceLimits.images);
+    const videoReferenceLimit = videoCapabilities?.videoInput?.referenceLimits.videos ?? (klingAcceptsVideoReferences ? 1 : referenceLimits.videos);
     const hasPendingLogs = logs.some((log) => (log.status === "生成中" || (log.status === "停止中" && !log.error)) && log.task && !log.video);
     const hasPendingTasks = hasPendingLogs || pendingCount > 0 || results.some((item) => item.status === "stopping" && !item.error);
     const usesBackendVideoTasks = (value: AiConfig) => value.channelMode === "remote" || (value.channelMode === "local" && Boolean(token));
@@ -407,8 +408,43 @@ export default function VideoPage() {
         updateElementReferences(elementIndex, (value) => moveListItem(value, index, offset));
     };
 
+    const addMeteorReferences = async (files: File[]) => {
+        try {
+            const metadata = await Promise.all(files.map(file => inspectReferenceFile(file, videoCapabilities)));
+            const selection = { references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences], firstFrame, lastFrame };
+            files.forEach((file, index) => {
+                const item = { ...metadata[index], id: "pending", name: file.name, type: file.type, url: "", dataUrl: "" };
+                if (file.type.startsWith("image/")) selection.references.push(item);
+                else if (file.type.startsWith("video/")) selection.videoReferences.push(item);
+                else selection.audioReferences.push(item);
+            });
+            const error = videoInputError(videoCapabilities, selection, videoConfig.videoGenerateAudio === "true");
+            if (error) throw new Error(error);
+            const nextImages: ReferenceImage[] = [], nextVideos: ReferenceVideo[] = [], nextAudios: ReferenceAudio[] = [];
+            for (const [index, file] of files.entries()) {
+                if (file.type.startsWith("image/")) {
+                    const image = await uploadImage(file);
+                    nextImages.push({ id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: file.size });
+                } else {
+                    const media = await uploadMediaFile(file, file.type.startsWith("video/") ? "video-reference" : "audio-reference");
+                    const item = { id: nanoid(), name: file.name, type: media.mimeType, url: media.url, storageKey: media.storageKey, bytes: file.size, durationMs: metadata[index].durationMs };
+                    if (file.type.startsWith("video/")) nextVideos.push({ ...item, width: media.width, height: media.height });
+                    else nextAudios.push(item);
+                }
+            }
+            setReferences(value => [...value, ...nextImages]);
+            setVideoReferences(value => [...value, ...nextVideos]);
+            setAudioReferences(value => [...value, ...nextAudios]);
+            if (files.length) message.success("素材已添加");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "参考素材上传失败");
+        }
+    };
+
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
+        if (videoCapabilities?.videoInput) return addMeteorReferences(selectedFiles);
+        try { selectedFiles.forEach(file => assertReferenceFileSize(file, videoCapabilities?.uploads)); } catch (error) { message.error(error instanceof Error ? error.message : "文件超过大小限制"); return; }
         const unsupported = isKlingWorkbench
             ? selectedFiles.filter((file) => (!file.type.startsWith("image/") || referenceImageLimit === 0) && (!file.type.startsWith("video/") || !klingAcceptsVideoReferences))
             : selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/") && !isSupportedAudioFile(file));
@@ -458,15 +494,18 @@ export default function VideoPage() {
             message.error("请选择首尾帧图片");
             return;
         }
-        if (file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes) {
-            message.warning("已忽略超过 30MB 的首尾帧图片");
-            return;
-        }
+        try {
+            assertReferenceFileSize(file, videoCapabilities?.uploads);
+            const candidate = { references, videoReferences, audioReferences, firstFrame: slot === "first" ? { bytes: file.size } : firstFrame, lastFrame: slot === "last" ? { bytes: file.size } : lastFrame };
+            const error = videoInputError(videoCapabilities, candidate, videoConfig.videoGenerateAudio === "true");
+            if (error) throw new Error(error);
+        } catch (error) { message.error(error instanceof Error ? error.message : "首尾帧不可用"); return; }
         const hideLoading = message.loading(slot === "first" ? "正在上传首帧..." : "正在上传尾帧...", 0);
         try {
             const image = await uploadImage(file);
-            const next = { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+            const next = { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: file.size };
             slot === "first" ? setFirstFrame(next) : setLastFrame(next);
+            if (slot === "first" && model === "doubao-seedance-2.5") updateVideoConfig("size", "adaptive");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "首尾帧上传失败");
         } finally {
@@ -509,6 +548,7 @@ export default function VideoPage() {
         try {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("image/")).map((type) => item.getType(type))));
+            if (videoCapabilities?.videoInput) return addMeteorReferences(blobs.map((blob, index) => new File([blob], "clipboard-" + index + ".png", { type: blob.type })));
             if (!blobs.length) {
                 message.error("剪切板里没有可读取的图片");
                 return;
@@ -535,10 +575,9 @@ export default function VideoPage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
-            if (blob.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes) {
-                message.warning("已忽略超过 30MB 的首尾帧图片");
-                return;
-            }
+            assertReferenceFileSize(blob, videoCapabilities?.uploads);
+            const inputError = videoInputError(videoCapabilities, { references, videoReferences, audioReferences, firstFrame: slot === "first" ? { bytes: blob.size } : firstFrame, lastFrame: slot === "last" ? { bytes: blob.size } : lastFrame }, videoConfig.videoGenerateAudio === "true");
+            if (inputError) { message.warning(inputError); return; }
             const hideLoading = message.loading(slot === "first" ? "正在读取首帧..." : "正在读取尾帧...", 0);
             try {
                 const image = await uploadImage(blob);
@@ -557,6 +596,7 @@ export default function VideoPage() {
         try {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("video/")).map((type) => item.getType(type))));
+            if (videoCapabilities?.videoInput) return addMeteorReferences(blobs.map((blob, index) => new File([blob], "clipboard-" + index + ".mp4", { type: blob.type })));
             if (!blobs.length) {
                 message.error("剪切板里没有可读取的视频");
                 return;
@@ -580,6 +620,7 @@ export default function VideoPage() {
         try {
             const items = await navigator.clipboard.read();
             const blobs = await Promise.all(items.flatMap((item) => item.types.filter((type) => type.startsWith("audio/")).map((type) => item.getType(type))));
+            if (videoCapabilities?.videoInput) return addMeteorReferences(blobs.map((blob, index) => new File([blob], "clipboard-" + index + ".mp3", { type: blob.type })));
             if (!blobs.length) {
                 message.error("剪切板里没有可读取的音频");
                 return;
@@ -696,6 +737,13 @@ export default function VideoPage() {
                 workflowRef,
             };
         }
+        // Site adapters validate the original roles against fresh capabilities.
+        // Never normalize an unsupported role into a different paid input mode.
+        if (usesBackendVideoTasks(configValue)) {
+            if (!text) { message.error("请输入视频提示词"); return null; }
+            if (!isAiConfigReady(configValue, modelValue)) { message.warning("请先选择可用模型"); return null; }
+            return { text, model: modelValue, config: buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue), references: [...referenceItems], firstFrame: firstFrameItem, lastFrame: lastFrameItem, videoReferences: [...videoReferenceItems], audioReferences: [...audioReferenceItems], taskCount: 1 };
+        }
         const klingV26 = isAPIMartKlingV26Config(configValue, modelValue);
         const klingV3 = isKlingV3Config(configValue, modelValue);
         const kling = klingV26 || klingV3;
@@ -744,7 +792,7 @@ export default function VideoPage() {
                 return null;
             }
         }
-        if (!kling && !isAutoDLConfig(configValue, modelValue) && !isMiniMaxH3Config(configValue, modelValue) && !isAgnesVideoV25Model(modelValue)) {
+        if (!(usesBackendVideoTasks(configValue) && videoCapabilities?.videoInput) && !kling && !isAutoDLConfig(configValue, modelValue) && !isMiniMaxH3Config(configValue, modelValue) && !isAgnesVideoV25Model(modelValue)) {
             const limits =
                 channelProtocolForConfig({ ...configValue, model: modelValue, videoModel: modelValue }) === "ark" && (modelKey(modelValue).includes("seedance-2-5") || modelKey(modelValue).includes("seedance2-5"))
                     ? ARK_SEEDANCE_REFERENCE_LIMITS
@@ -755,7 +803,11 @@ export default function VideoPage() {
                 return null;
             }
         }
-        const frameReferencesEnabled = !kling && supportsVideoFrameReferences(modelValue, channelProtocolForConfig({ ...configValue, model: modelValue }));
+        if (usesBackendVideoTasks(configValue) && modelValue === model) {
+            const error = videoInputError(videoCapabilities, { references: referenceItems, videoReferences: videoReferenceItems, audioReferences: audioReferenceItems, firstFrame: firstFrameItem, lastFrame: lastFrameItem }, configValue.videoGenerateAudio === "true");
+            if (error) { message.error(error); return null; }
+        }
+        const frameReferencesEnabled = usesBackendVideoTasks(configValue) && modelValue === model && videoCapabilities?.videoInput ? videoCapabilities.videoInput.firstFrame || videoCapabilities.videoInput.lastFrame : !kling && supportsVideoFrameReferences(modelValue, channelProtocolForConfig({ ...configValue, model: modelValue }));
         const normalizedConfig = buildVideoConfig({ ...configValue, videoNegativePrompt: currentNegativePrompt }, modelValue);
         if (omni === "reference-to-video" && videoReferenceItems.length) normalizedConfig.videoGenerateAudio = "false";
         const imageReferences = omni === "text-to-video" ? [] : omni === "reference-to-video" ? [...referenceItems] : [...referenceItems].slice(0, kling ? (omni === "transformation" ? 4 : 2) : referenceItems.length);
@@ -793,7 +845,7 @@ export default function VideoPage() {
                 message.warning("登录状态已变化，请重新打开创作台。");
                 return;
             }
-            const validationError = videoCapabilityError(capabilities, snapshot.config);
+            const validationError = videoCapabilityError(capabilities, snapshot.config) || videoInputError(capabilities, snapshot, snapshot.config.videoGenerateAudio === "true");
             if (validationError) {
                 message.warning(validationError);
                 return;
@@ -1606,7 +1658,7 @@ export default function VideoPage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept={isKlingWorkbench ? (klingAcceptsVideoReferences ? "image/*,video/mp4,video/quicktime" : "image/*") : "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"}
+                accept={videoCapabilities?.videoInput ? referenceAccept(videoCapabilities) : isKlingWorkbench ? (klingAcceptsVideoReferences ? "image/*,video/mp4,video/quicktime" : "image/*") : "image/*,video/mp4,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav"}
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -1735,7 +1787,10 @@ function WorkbenchPanel({
     bottomSettingsCollapsed?: boolean;
     setBottomSettingsCollapsed?: (value: boolean) => void;
 }) {
-    const frameReferencesEnabled = Boolean(config.videoWorkflowRef) || supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
+    const { data: capabilities } = useVideoCapabilities(config, model);
+    const inputPolicy = capabilities?.videoInput;
+    const frameReferencesEnabled = inputPolicy ? inputPolicy.firstFrame || inputPolicy.lastFrame : Boolean(config.videoWorkflowRef) || supportsVideoFrameReferences(model, channelProtocolForConfig({ ...config, model }));
+    const materialError = videoInputError(capabilities, { references, firstFrame, lastFrame, videoReferences, audioReferences }, config.videoGenerateAudio === "true");
     const referenceLimits =
         !config.videoWorkflowRef && channelProtocolForConfig({ ...config, model, videoModel: model }) === "ark" && (modelKey(model).includes("seedance-2-5") || modelKey(model).includes("seedance2-5"))
             ? ARK_SEEDANCE_REFERENCE_LIMITS
@@ -1804,6 +1859,7 @@ function WorkbenchPanel({
                                 {audioReferences.length ? <ReferenceAudioStrip references={audioReferences} compact onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} /> : null}
                             </div>
                         ) : null}
+                        <p className="text-xs text-stone-500">{materialError || REFERENCE_UPLOAD_NOTICE}</p>
                         <div className="flex flex-col gap-3 border-t border-stone-200/70 pt-3 sm:flex-row sm:items-end sm:justify-between dark:border-stone-800">
                             <PriceSummary config={config} capability="video" model={model} inputVideo={videoReferences.length > 0} compact className="min-w-0 flex-1" />
                             <Button type="primary" className="h-11 min-w-28 shrink-0 rounded-xl" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
@@ -1846,7 +1902,7 @@ function WorkbenchPanel({
                         <FrameReferenceStrip firstFrame={firstFrame} lastFrame={lastFrame} onPasteFrame={onPasteFrame} onUploadFrame={onUploadFrame} onOpenAssetPicker={onOpenAssetPicker} onRemoveFrame={onRemoveFrame} />
                     </WorkbenchSection>
                 ) : null}
-                <WorkbenchSection title="参考图" count={references.length}>
+                {(!inputPolicy || inputPolicy.referenceTypes.includes("image") || references.length > 0) ? (<WorkbenchSection title="参考图" count={references.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteReferences}>
@@ -1861,8 +1917,8 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceImageStrip references={references} maxCount={referenceLimits.images} onRemoveReference={onRemoveReference} onMoveReference={onMoveReference} />
                     </div>
-                </WorkbenchSection>
-                <WorkbenchSection title="参考视频" count={videoReferences.length}>
+                </WorkbenchSection>) : null}
+                {(!inputPolicy || inputPolicy.referenceTypes.includes("video") || videoReferences.length > 0) ? (<WorkbenchSection title="参考视频" count={videoReferences.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteVideoReferences}>
@@ -1877,8 +1933,8 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceVideoStrip references={videoReferences} maxCount={referenceLimits.videos} onRemoveReference={onRemoveVideoReference} onMoveReference={onMoveVideoReference} />
                     </div>
-                </WorkbenchSection>
-                <WorkbenchSection title="参考音频" count={audioReferences.length}>
+                </WorkbenchSection>) : null}
+                {(!inputPolicy || inputPolicy.referenceTypes.includes("audio") || audioReferences.length > 0) ? (<WorkbenchSection title="参考音频" count={audioReferences.length}>
                     <div className="space-y-2">
                         <div className="flex flex-wrap gap-1">
                             <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={onPasteAudioReferences}>
@@ -1893,7 +1949,10 @@ function WorkbenchPanel({
                         </div>
                         <ReferenceAudioStrip references={audioReferences} maxCount={referenceLimits.audios} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
                     </div>
-                </WorkbenchSection>
+                </WorkbenchSection>) : null}
+                <p className="text-xs leading-5 text-stone-500">{REFERENCE_UPLOAD_NOTICE} · 每次最多4个素材 · 保留7天</p>
+                {inputPolicy ? <p className="text-xs text-stone-500">首尾帧与参考素材分开使用{inputPolicy.referenceDuration ? "；参考视频、音频 " + inputPolicy.referenceDuration.min + "–" + inputPolicy.referenceDuration.max + " 秒" : ""}</p> : null}
+                {materialError ? <p role="alert" className="text-xs text-red-600">{materialError}</p> : null}
                 {motionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
                 <GenerationSettings config={config} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
             </div>

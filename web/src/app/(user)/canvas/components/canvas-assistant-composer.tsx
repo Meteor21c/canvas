@@ -58,7 +58,7 @@ export function CanvasAssistantComposer({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const reasoningEnabled = agentConfig.textReasoningEnabled === true;
-    const imageConfig = useMemo(() => ({ ...effectiveConfig, quality: agentConfig.imageQuality, size: agentConfig.imageSize }), [agentConfig.imageQuality, agentConfig.imageSize, effectiveConfig]);
+    const imageConfig = useMemo(() => ({ ...effectiveConfig, model: effectiveConfig.imageModel, quality: agentConfig.imageQuality, imageResolution: agentConfig.imageResolution || effectiveConfig.imageResolution, size: agentConfig.imageSize }), [agentConfig.imageQuality, agentConfig.imageResolution, agentConfig.imageSize, effectiveConfig]);
     const videoConfig = useMemo(() => ({ ...effectiveConfig, activeChannelId: effectiveConfig.videoChannelId || effectiveConfig.activeChannelId, vquality: agentConfig.videoQuality, size: agentConfig.videoSize }), [agentConfig.videoQuality, agentConfig.videoSize, effectiveConfig]);
     const promptReferences = useMemo(() => {
         const seen = new Set<string>();
@@ -112,6 +112,7 @@ export function CanvasAssistantComposer({
                             buttonClassName="!h-8 !max-w-[116px] !justify-start !rounded-full !px-2.5"
                             onConfigChange={(key, value) => {
                                 if (key === "quality") onAgentConfigChange({ imageQuality: value });
+                                else if (key === "imageResolution") onAgentConfigChange({ imageResolution: value });
                                 else if (key === "size") onAgentConfigChange({ imageSize: value });
                             }}
                         />

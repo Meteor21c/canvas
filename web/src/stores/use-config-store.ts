@@ -5,6 +5,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { directAIProviderForProtocol, isWorkflowProtocol, type DirectAIProvider, type ModelChannelProtocol } from "@/lib/model-channel";
+import { migrateImageSettings } from "@/lib/image-resolution";
 import type { WorkflowRef, WorkflowSummary } from "@/lib/workflow-channel";
 import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
@@ -75,6 +76,7 @@ export type AiConfig = {
     textModels: string[];
     audioModels: string[];
     quality: string;
+    imageResolution: string;
     size: string;
     videoSize: string;
     count: string;
@@ -150,6 +152,7 @@ export const defaultConfig: AiConfig = {
     textModels: [],
     audioModels: [],
     quality: "auto",
+    imageResolution: "1k",
     size: "1:1",
     videoSize: "1280x720",
     count: "1",
@@ -449,6 +452,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channelMode: "remote",
                         publicChannels: [],
                         imageModel: config.imageModel || config.model,
+                        ...migrateImageSettings(persistedConfig),
                         videoModel: config.videoModel || "grok-imagine-video",
                         textModel: config.textModel || config.model,
                         audioModel: config.audioModel || defaultConfig.audioModel,

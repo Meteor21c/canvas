@@ -34,6 +34,8 @@ import { saveAs } from "file-saver";
 import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel, imageSizeOptions } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { PriceSummary } from "@/components/pricing/price-summary";
+import { useMeteorCapabilities } from "@/hooks/use-meteor-pricing";
+import { imageAspectRatio, imageResolutionOptions, imageResolutionSelection, imageSizeAllowed, imageSizeTier, migrateImageSettings, normalizeImageResolution, resolveImageRequestSize } from "@/lib/image-resolution";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/app/(user)/canvas/components/canvas-node-mask-edit-dialog";
@@ -117,7 +119,7 @@ type GenerationLog = {
     lastPolledAt?: number;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "channelMode" | "model" | "imageModel" | "activeChannelId" | "imageChannelId" | "quality" | "size" | "count" | "apiMode" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli">;
+type GenerationLogConfig = Pick<AiConfig, "channelMode" | "model" | "imageModel" | "activeChannelId" | "imageChannelId" | "quality" | "imageResolution" | "size" | "count" | "apiMode" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli">;
 type RequestSnapshot = { text: string; requestConfig: AiConfig; displayConfig: GenerationLogConfig; references: ReferenceImage[]; workflowRef?: WorkflowRef };
 type GenerationCategory = { id: string; name: string; createdAt: number };
 type ResultViewMode = "all" | "category";
@@ -163,7 +165,7 @@ export default function ImagePage() {
     const [workbenchLayout, setWorkbenchLayoutState] = useState<WorkbenchLayout>("side");
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
-    const [maskEditTarget, setMaskEditTarget] = useState<{ image: GeneratedImage; model: string; channelId: string; quality: string; size: string; open: boolean } | null>(null);
+    const [maskEditTarget, setMaskEditTarget] = useState<{ image: GeneratedImage; model: string; channelId: string; quality: string; imageResolution: string; size: string; open: boolean } | null>(null);
     const [workflowDrawerOpen, setWorkflowDrawerOpen] = useState(false);
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
@@ -461,6 +463,7 @@ export default function ImagePage() {
             model: nextModel,
             channelId: resolveImageChannelId(effectiveConfig, nextModel, imageTaskChannelId(log.task), log.config.imageChannelId, log.config.activeChannelId),
             quality: log.config.quality || "auto",
+            imageResolution: log.config.imageResolution || imageSizeTier(log.config.size) || "1k",
             size: log.config.size || "auto",
             open: true,
         });
@@ -477,6 +480,7 @@ export default function ImagePage() {
                     imageModel: payload.model || target.model,
                     imageChannelId: payload.channelId || target.channelId,
                     quality: target.quality,
+                    imageResolution: target.imageResolution,
                     size: target.size,
                 },
                 workflowRef: null,
@@ -1129,6 +1133,7 @@ export default function ImagePage() {
             updateConfig("activeChannelId", nextChannelId);
         }
         if (log.config.quality) updateConfig("quality", log.config.quality);
+        updateConfig("imageResolution", log.config.imageResolution || imageSizeTier(log.config.size) || "1k");
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", String(normalizedImageCount(log.config.count)));
         updateConfig("apiMode", "images");
@@ -1563,6 +1568,25 @@ function WorkbenchPanel({
     uploadingCount: number;
 }) {
     const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
+    const capabilities = useMeteorCapabilities({ kind: "image", model, channelId: config.imageChannelId || config.activeChannelId });
+    const resolution = imageSizeTier(config.size) || normalizeImageResolution(config.imageResolution);
+    const resolutions = imageResolutionOptions.filter(option => capabilities.data?.resolutions.some(value => value.toLowerCase() === option.value));
+    const selectResolution = (value: string) => {
+        const selection = imageResolutionSelection(model, value, config.size);
+        updateConfig("imageResolution", selection.imageResolution);
+        updateConfig("size", selection.size);
+    };
+    useEffect(() => {
+        if (resolutions.length && !resolutions.some(option => option.value === resolution)) selectResolution(resolutions[0].value);
+    }, [capabilities.data, resolution]);
+    const selectRatio = (value: string) => {
+        if (!imageSizeAllowed(model, resolveImageRequestSize(resolution, value))) {
+            const supported = resolutions.find(tier => imageSizeAllowed(model, resolveImageRequestSize(tier.value, value)));
+            if (!supported) return;
+            updateConfig("imageResolution", supported.value);
+        }
+        updateConfig("size", value);
+    };
 
     if (layout === "bottom") {
         return (
@@ -1593,7 +1617,7 @@ function WorkbenchPanel({
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
                             </div>
                         </div>
-                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-[minmax(0,1.6fr)_1fr_1fr_0.7fr_auto] ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
+                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-[minmax(0,1.8fr)_1fr_1fr_1fr_0.7fr_auto] ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
                             <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
                                 模型
                                 <ModelPicker
@@ -1612,7 +1636,8 @@ function WorkbenchPanel({
                                     fullWidth
                                 />
                             </label>
-                            <QuickSelect label="尺寸" value={config.size || "auto"} options={imageSizeOptions} onChange={(value) => updateConfig("size", value)} />
+                            <QuickSelect label="分辨率" value={resolution} options={resolutions.length ? resolutions : imageResolutionOptions.filter(option => option.value === resolution)} onChange={selectResolution} />
+                            <QuickSelect label="画面比例" value={imageAspectRatio(config.size || "1:1")} options={imageSizeOptions.filter(option => imageSizeAllowed(model, resolveImageRequestSize(resolution, option.value)) || resolutions.some(tier => imageSizeAllowed(model, resolveImageRequestSize(tier.value, option.value))))} onChange={selectRatio} />
                             <QuickSelect label="质量" value={config.quality || "auto"} options={quickQualityOptions} onChange={(value) => updateConfig("quality", value)} />
                             <QuickSelect label="数量" value={String(normalizedImageCount(config.count))} options={imageCountOptions} onChange={(value) => updateConfig("count", value)} />
                             <ReferenceQuickActions references={references} onUploadReferences={onUploadReferences} />
@@ -1774,7 +1799,7 @@ function QuickSelect({ label, value, options, onChange }: { label: string; value
 }
 
 function settingsSummary(config: AiConfig, model: string) {
-    return [model, imageSizeLabel(config.size || "auto"), imageQualityLabel(config.quality || "auto"), `${config.count || "1"} 张`, config.apiMode !== "chat" && config.streamImages ? `流式 ${config.streamPartialImages || "1"}` : "非流式"].join(" · ");
+    return [model, (imageSizeTier(config.size) || normalizeImageResolution(config.imageResolution)).toUpperCase(), imageSizeLabel(config.size || "auto"), imageQualityLabel(config.quality || "auto"), `${config.count || "1"} 张`, config.apiMode !== "chat" && config.streamImages ? `流式 ${config.streamPartialImages || "1"}` : "非流式"].join(" · ");
 }
 
 function ResultsPanel({
@@ -2081,7 +2106,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                     />
                 </div>
             </section>
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" maxCount={4} />
+            <ImageSettingsPanel config={{ ...config, model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-3" maxCount={4} />
         </div>
     );
 }
@@ -2975,7 +3000,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         imageModel: log.config?.imageModel || log.model || "",
         activeChannelId: taskChannelId || log.config?.activeChannelId || log.config?.imageChannelId || "",
         imageChannelId: taskChannelId || log.config?.imageChannelId || log.config?.activeChannelId || "",
-        quality: log.config?.quality || log.quality || "",
+        ...migrateImageSettings({ quality: log.config?.quality || log.quality, imageResolution: log.config?.imageResolution, size: log.config?.size || log.size }),
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
         apiMode: log.config?.apiMode || "images",
@@ -3007,6 +3032,7 @@ function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
         activeChannelId: config.imageChannelId || config.activeChannelId,
         imageChannelId: config.imageChannelId,
         quality: config.quality,
+        imageResolution: config.imageResolution,
         size: config.size,
         count: config.count,
         apiMode: "images",

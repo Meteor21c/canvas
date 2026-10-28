@@ -41,6 +41,7 @@ export type CanvasAgentContext = {
         videoModel: string;
         audioModel: string;
         imageQuality: string;
+        imageResolution: string;
         imageSize: string;
         videoQuality: string;
         videoSize: string;
@@ -122,6 +123,7 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
             videoModel,
             audioModel,
             imageQuality: input.config.quality,
+            imageResolution: input.config.imageResolution,
             imageSize: input.config.size,
             videoQuality: input.config.vquality,
             videoSize: input.config.videoSize,

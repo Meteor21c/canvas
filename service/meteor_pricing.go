@@ -66,21 +66,23 @@ type MeteorDuration struct {
 	Values []int `json:"values,omitempty"`
 }
 type MeteorCapabilities struct {
-	Kind           string           `json:"kind"`
-	Model          string           `json:"model"`
-	ChannelID      string           `json:"channelId"`
-	Available      bool             `json:"available"`
-	MaxBatch       int              `json:"maxBatch"`
-	MaxReferences  int              `json:"maxReferences"`
-	ForcedProtocol string           `json:"forcedProtocol"`
-	Watermark      bool             `json:"watermark"`
-	Resolutions    []string         `json:"resolutions"`
-	Duration       *MeteorDuration  `json:"duration"`
-	SupportsAudio  bool             `json:"supportsAudio"`
-	AspectRatios   []string         `json:"aspectRatios"`
-	Scenarios      []MeteorScenario `json:"scenarios"`
-	RetentionDays  int              `json:"retentionDays"`
-	Notice         string           `json:"notice"`
+	VideoInput     *MeteorVideoInputPolicy `json:"videoInput,omitempty"`
+	Uploads        *MeteorUploadPolicy     `json:"uploads,omitempty"`
+	Kind           string                  `json:"kind"`
+	Model          string                  `json:"model"`
+	ChannelID      string                  `json:"channelId"`
+	Available      bool                    `json:"available"`
+	MaxBatch       int                     `json:"maxBatch"`
+	MaxReferences  int                     `json:"maxReferences"`
+	ForcedProtocol string                  `json:"forcedProtocol"`
+	Watermark      bool                    `json:"watermark"`
+	Resolutions    []string                `json:"resolutions"`
+	Duration       *MeteorDuration         `json:"duration"`
+	SupportsAudio  bool                    `json:"supportsAudio"`
+	AspectRatios   []string                `json:"aspectRatios"`
+	Scenarios      []MeteorScenario        `json:"scenarios"`
+	RetentionDays  int                     `json:"retentionDays"`
+	Notice         string                  `json:"notice"`
 }
 type meteorRawScenario struct {
 	Resolutions     []string        `json:"resolutions"`
@@ -219,7 +221,7 @@ func meteorVideoDuration(modelName string) *MeteorDuration {
 	return result
 }
 func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, modelName string) (MeteorCapabilities, error) {
-	cap := MeteorCapabilities{Kind: kind, Model: modelName, ChannelID: channelID, MaxBatch: 4, MaxReferences: 4, ForcedProtocol: "images", Resolutions: []string{}, AspectRatios: []string{}, Scenarios: []MeteorScenario{}, RetentionDays: 7}
+	cap := MeteorCapabilities{Kind: kind, Model: modelName, ChannelID: channelID, MaxBatch: 4, MaxReferences: 4, ForcedProtocol: "images", Resolutions: []string{}, AspectRatios: []string{}, Scenarios: []MeteorScenario{}, RetentionDays: 7, Uploads: meteorUploadsPolicy()}
 	channel, err := MeteorSelectChannel(userID, modelName, channelID)
 	if err != nil {
 		return cap, err
@@ -228,6 +230,20 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 	if kind == "image" {
 		if channel.ModelCapabilities[modelName] != "image" || channel.Protocol != "openai" {
 			return cap, errors.New("当前模型未开放图片生成")
+		}
+		quote, quoteErr := meteorImageQuote(ctx, userID, channel, MeteorQuoteInput{Kind: "image", Model: modelName, ChannelID: channel.ID, Count: 1, Resolution: "1K"}, MeteorPrice{Kind: "image", Model: modelName, ChannelID: channel.ID})
+		if quoteErr == nil {
+			for _, tier := range []string{"1K", "2K", "4K"} {
+				if quote.ImagePriceBySize[tier] != nil {
+					cap.Resolutions = append(cap.Resolutions, tier)
+				}
+			}
+		}
+		// Resolutions describe a known model's accepted size tiers, not a fixed
+		// per-image total. Token tariffs keep all unknown totals null.
+		image2 := strings.ToLower(strings.TrimSpace(modelName))
+		if len(cap.Resolutions) == 0 && quoteErr == nil && quote.Available && quote.BillingMode == "token" && (image2 == "gpt-image-2" || strings.HasPrefix(image2, "gpt-image-2-")) {
+			cap.Resolutions = []string{"1K", "2K", "4K"}
 		}
 		cap.Available = true
 		return cap, nil
@@ -238,6 +254,12 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 	cap.MaxBatch = 1
 	cap.ForcedProtocol = "sub2api"
 	cap.Duration = meteorVideoDuration(modelName)
+	cap.VideoInput = meteorVideoInputPolicy(modelName)
+	if strings.HasPrefix(modelName, "doubao-seedance-") {
+		cap.AspectRatios = []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}
+	} else if strings.HasPrefix(modelName, "kling-") {
+		cap.AspectRatios = []string{"16:9", "9:16", "1:1"}
+	}
 	if channel.ModelCapabilities[modelName] != "video" || cap.Duration == nil {
 		cap.Notice = "当前模型能力尚未确认，暂不可提交"
 		return cap, nil
@@ -262,14 +284,14 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 		return cap, nil
 	}
 	for _, resolution := range raw.Resolutions {
-		if meteorValidResolution(resolution) {
+		if meteorVideoResolutionAllowed(modelName, resolution) {
 			cap.Resolutions = append(cap.Resolutions, resolution)
 		}
 	}
 	for _, row := range raw.Scenarios {
 		safe := MeteorScenario{Resolutions: []string{}, BillingMode: row.Mode, Currency: row.Currency, Unit: "unknown", SaleRateToOfficial: meteorDecimal(row.Ratio)}
 		for _, value := range row.Resolutions {
-			if meteorValidResolution(value) {
+			if meteorVideoResolutionAllowed(modelName, value) {
 				safe.Resolutions = append(safe.Resolutions, value)
 			}
 		}

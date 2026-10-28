@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
@@ -10,6 +10,7 @@ import { PriceSummary } from "@/components/pricing/price-summary";
 import { useVideoSelection } from "@/hooks/use-video-selection";
 import { useAutoDLWorkflow } from "@/hooks/use-autodl-workflow";
 import { getAutoDLCapabilities, isAutoDLConfig } from "@/lib/autodl";
+import { REFERENCE_UPLOAD_NOTICE } from "@/lib/meteor-video-input";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -21,9 +22,9 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
 import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
 import { CanvasVideoSettingsPopover, type CanvasVideoFrameOption, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
 import { PANORAMA_IMAGE_SIZE, isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
-import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import type { CanvasResourceKind, CanvasResourceReference } from "../utils/canvas-resource-references";
 
 export type { CanvasVideoFrameOption };
 
@@ -31,6 +32,7 @@ export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
+    viewport: ViewportTransform;
     isRunning: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
@@ -39,13 +41,13 @@ type CanvasNodePromptPanelProps = {
     mentionReferences?: CanvasResourceReference[];
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
-    onStartReferenceSelection?: (nodeId: string) => void;
+    onStartReferenceSelection?: (nodeId: string, allowedKinds?: CanvasResourceKind[]) => void;
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -53,6 +55,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const videoSelection = useVideoSelection(config, (key, value) => onConfigChange(node.id, videoConfigPatch(key, value)), mode === "video");
+    const siteVideo = mode === "video" && (config.videoChannelId || config.activeChannelId).startsWith("meteor-key-");
+    const videoInput = siteVideo ? videoSelection.data?.videoInput : undefined;
+    const referenceKinds: CanvasResourceKind[] | undefined = siteVideo ? ["text", ...(videoInput?.modes.includes("reference") ? videoInput.referenceTypes.filter((kind): kind is "image" | "video" | "audio" => kind === "image" || kind === "video" || kind === "audio") : []), ...(videoInput?.modes.includes("frames") && (videoInput.firstFrame || videoInput.lastFrame) ? ["image" as const] : [])] : undefined;
+    const selectableMentions = referenceKinds ? mentionReferences.filter((reference) => referenceKinds.includes(reference.kind)) : mentionReferences;
+    const selectableFrames = siteVideo && !videoInput?.modes.includes("frames") ? [] : videoFrameOptions;
+    const selectableResources = siteVideo ? videoResourceOptions.filter((resource) => resource.kind === "text" || Boolean(videoInput?.modes.includes("reference") && videoInput.referenceTypes.includes(resource.kind))) : videoResourceOptions;
+    const startReferenceSelection = (nodeId: string) => onStartReferenceSelection?.(nodeId, referenceKinds);
+    const incompatibleFrames = Boolean(siteVideo && videoInput && ((node.metadata?.firstFrameNodeId && (!videoInput.modes.includes("frames") || !videoInput.firstFrame)) || (node.metadata?.lastFrameNodeId && (!videoInput.modes.includes("frames") || !videoInput.lastFrame || (videoInput.lastFrameRequiresFirst && !node.metadata.firstFrameNodeId)))));
     const { data: autodlWorkflow } = useAutoDLWorkflow(config, mode === "video" ? config.model : "");
     const isPanorama = isPanoramaNodeType(node.type);
     const textOverwrite = node.type === CanvasNodeType.Text && globalConfig.nodeRegenerateBehavior === "overwrite" && Boolean(node.metadata?.clientTaskId);
@@ -67,7 +77,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
     const [expanded, setExpanded] = useState(false);
-    const [compactViewport, setCompactViewport] = useState(false);
+    const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const [panelLayout, setPanelLayout] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
     const workflowRef = node.metadata?.workflowRef;
     const billingModel = workflowRef
         ? `workflow:${workflowRef.scope}:${workflowRef.channelId}:${workflowRef.kind}:${workflowRef.workflowId}`
@@ -78,13 +90,40 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         setPrompt(sourcePrompt);
     }, [node.id, sourcePrompt]);
 
-    useEffect(() => {
-        const query = window.matchMedia("(max-width: 639px)");
-        const update = () => setCompactViewport(query.matches);
+    useEffect(() => setPortalTarget(document.body), []);
+
+    // Keep screen UI outside the canvas transform and within the usable viewport.
+    useLayoutEffect(() => {
+        if (!portalTarget || !panelRef.current) return;
+        const update = () => {
+            const visualViewport = window.visualViewport;
+            const viewportWidth = visualViewport?.width || window.innerWidth;
+            const viewportHeight = visualViewport?.height || window.innerHeight;
+            const offsetLeft = visualViewport?.offsetLeft || 0;
+            const safeTop = (visualViewport?.offsetTop || 0) + 72;
+            const safeBottom = (visualViewport?.offsetTop || 0) + viewportHeight - 88;
+            const width = Math.min(560, viewportWidth - 24);
+            const maxHeight = Math.max(80, safeBottom - safeTop);
+            const height = Math.min(panelRef.current?.offsetHeight || maxHeight, maxHeight);
+            const anchor = document.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`)?.getBoundingClientRect();
+            const left = Math.max(offsetLeft + 12, Math.min((anchor ? anchor.left + anchor.width / 2 : offsetLeft + viewportWidth / 2) - width / 2, offsetLeft + viewportWidth - width - 12));
+            const preferredTop = viewportWidth < 640 ? safeBottom - height : (anchor?.bottom ?? safeTop) + 12;
+            const top = Math.max(safeTop, Math.min(preferredTop, safeBottom - height));
+            setPanelLayout((current) => current && current.left === left && current.top === top && current.width === width && current.maxHeight === maxHeight ? current : { left, top, width, maxHeight });
+        };
         update();
-        query.addEventListener("change", update);
-        return () => query.removeEventListener("change", update);
-    }, []);
+        const observer = new ResizeObserver(update);
+        observer.observe(panelRef.current);
+        window.addEventListener("resize", update);
+        window.visualViewport?.addEventListener("resize", update);
+        window.visualViewport?.addEventListener("scroll", update);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", update);
+            window.visualViewport?.removeEventListener("resize", update);
+            window.visualViewport?.removeEventListener("scroll", update);
+        };
+    }, [portalTarget, node.id, node.position.x, node.position.y, node.width, node.height, viewport.x, viewport.y, viewport.k]);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -101,35 +140,34 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const panel = (
         <div
+            ref={panelRef}
             data-canvas-no-zoom
             data-canvas-prompt-panel
             aria-label="节点生成参数与费用"
-            className={"rounded-2xl border p-3 shadow-2xl backdrop-blur" + (compactViewport ? " thin-scrollbar fixed inset-x-3 bottom-24 z-[80] max-h-[calc(100dvh-168px)] overflow-y-auto overscroll-contain" : "")}
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            className="thin-scrollbar fixed z-[80] overflow-y-auto overscroll-contain rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            style={{ ...panelLayout, visibility: panelLayout ? "visible" : "hidden", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={onStartReferenceSelection} />
+            <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={startReferenceSelection} />
+            {siteVideo ? <p className="mb-2 text-[10px] leading-4 opacity-60">{REFERENCE_UPLOAD_NOTICE} · 素材保留7天</p> : null}
+            {incompatibleFrames ? <p className="mb-2 text-xs leading-4 text-amber-600 dark:text-amber-400">已保留原首尾帧选择；当前模型不支持该组合，请在视频设置中调整或明确移除后再生成。</p> : null}
             <CanvasPromptChipInput
                 value={prompt}
-                references={mentionReferences}
+                references={selectableMentions}
                 onChange={updatePrompt}
                 onSubmit={submit}
-                className="thin-scrollbar h-40 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
+                className="thin-scrollbar h-24 max-h-[18dvh] min-h-16 w-full resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: "transparent", color: theme.node.text }}
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
 
-            <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                    <Tooltip title="放大编辑">
-                        <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={() => setExpanded(true)} aria-label="放大编辑" />
-                    </Tooltip>
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+            <div className="mt-3 min-w-0 space-y-2" data-canvas-prompt-controls>
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_148px] items-center gap-2 [&>*:only-child]:col-span-2">
                     {mode === "image" ? (
                         <>
-                            <ModelPicker className="!w-auto !min-w-[160px] !max-w-[280px] !flex-1" config={config} value={config.model} channelId={config.imageChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker className="!h-10 !w-full !min-w-0 !max-w-none" config={config} value={config.model} channelId={config.imageChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={node.metadata?.workflowRef ? { ...config, model: "" } : config}
                                 placement="topLeft"
@@ -142,25 +180,30 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker className="!w-auto !min-w-[160px] !max-w-[280px] !flex-1" config={config} value={config.model} channelId={config.videoChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !w-[148px] !shrink-0 !justify-start !rounded-full !px-3" frameOptions={videoFrameOptions} resourceOptions={videoResourceOptions} metadata={node.metadata} firstFrameNodeId={node.metadata?.firstFrameNodeId} lastFrameNodeId={node.metadata?.lastFrameNodeId} onFrameChange={(patch) => onConfigChange(node.id, patch)} onMetadataChange={(patch) => onConfigChange(node.id, patch)} onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <ModelPicker className="!h-10 !w-full !min-w-0 !max-w-none" config={config} value={config.model} channelId={config.videoChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !w-[148px] !shrink-0 !justify-start !rounded-full !px-3" frameOptions={selectableFrames} resourceOptions={selectableResources} metadata={node.metadata} firstFrameNodeId={node.metadata?.firstFrameNodeId} lastFrameNodeId={node.metadata?.lastFrameNodeId} onFrameChange={(patch) => onConfigChange(node.id, patch)} onMetadataChange={(patch) => onConfigChange(node.id, patch)} onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
-                            <ModelPicker className="!w-auto !min-w-[160px] !max-w-[280px] !flex-1" config={config} value={config.model} channelId={config.audioChannelId || config.activeChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker className="!h-10 !w-full !min-w-0 !max-w-none" config={config} value={config.model} channelId={config.audioChannelId || config.activeChannelId} workflowRef={node.metadata?.workflowRef} onWorkflowChange={(workflowRef) => onConfigChange(node.id, { workflowRef })} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasAudioSettingsPopover config={config} resourceOptions={videoResourceOptions} metadata={node.metadata} onMetadataChange={(patch) => onConfigChange(node.id, patch)} buttonClassName="!h-10 !w-[148px] !shrink-0 !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} channelId={config.textChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
+                        <ModelPicker className="!h-10 !w-full !min-w-0 !max-w-none" config={config} value={config.model} channelId={config.textChannelId} onChange={(model, channelId) => onConfigChange(node.id, { model, channelId })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
+                </div>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Tooltip title="放大编辑">
+                        <Button type="text" className="!h-8 !w-8 !min-w-8 shrink-0 !rounded-full !bg-transparent !p-0" style={{ color: theme.node.text }} icon={<Maximize2 className="size-3.5" />} onClick={() => setExpanded(true)} aria-label="放大编辑" />
+                    </Tooltip>
+                    <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "video" || (mode === "image" && !isPanorama) ? (
                         <CanvasCameraControl value={node.metadata?.cameraControl} onChange={(cameraControl) => onConfigChange(node.id, { cameraControl })} buttonClassName="!h-10 !min-w-[92px] !justify-start !rounded-full !px-3" />
                     ) : null}
-                </div>
                 <Button
                     type="primary"
                     danger={showStop}
-                    className="!h-10 !min-w-20 shrink-0 !rounded-full !px-4"
+                    className="!ml-auto !h-10 !min-w-20 shrink-0 !rounded-full !px-4"
                     disabled={(isStopping && !stopFailed) || (!canStop && (generating || !canSubmit || (mode === "video" && !videoSelection.valid)))}
                     onClick={canStop ? () => onStop(node.id) : submit}
                     aria-label={canStop ? stopFailed ? "重试停止" : "停止" : isStopping ? "停止中" : "生成"}
@@ -175,16 +218,17 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </span> : null}
                     </span>
                 </Button>
+                </div>
             </div>
             {mode === "image" || mode === "video" ? <div className="mt-3 border-t border-stone-200/70 pt-3 dark:border-stone-700/70"><PriceSummary config={config} capability={mode} model={config.model} inputVideo={connectedNodes.some(item => item.type === CanvasNodeType.Video)} compact /></div> : null}
             <Modal title="编辑提示词" open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-                    <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); onStartReferenceSelection?.(nodeId); }} />
+                    <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); startReferenceSelection(nodeId); }} />
                     <CanvasPromptChipInput
                         value={prompt}
-                        references={mentionReferences}
+                        references={selectableMentions}
                         onChange={updatePrompt}
-                        className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-2xl border p-4 text-[15px] leading-6 outline-none"
+                        className="thin-scrollbar h-[52dvh] max-h-[calc(100dvh-220px)] min-h-32 w-full cursor-text overflow-y-auto rounded-2xl border p-4 text-[15px] leading-6 outline-none"
                         style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
                         placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
                     />
@@ -192,7 +236,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </Modal>
         </div>
     );
-    return compactViewport ? createPortal(panel, document.body) : panel;
+    return portalTarget ? createPortal(panel, portalTarget) : null;
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
@@ -216,6 +260,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         textChannelId,
         audioChannelId,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        imageResolution: node.metadata?.imageResolution || globalConfig.imageResolution || defaultConfig.imageResolution,
         size: isPanoramaNodeType(node.type) ? PANORAMA_IMAGE_SIZE : node.metadata?.size || (mode === "video" ? globalConfig.videoSize || defaultConfig.videoSize : globalConfig.size || defaultConfig.size),
         videoSeconds: isAutoDLConfig({ ...globalConfig, activeChannelId, videoChannelId }, node.metadata?.model || defaultModel) ? node.metadata?.seconds ?? globalConfig.videoSeconds : node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,

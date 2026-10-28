@@ -55,12 +55,12 @@ func TestMeteorImageBoundaryJSONAndMultipart(t *testing.T) {
 }
 
 func TestMeteorVideoCanonicalBodyLimitsAndWatermark(t *testing.T) {
-	for _, body := range []string{`{"count":2}`, `{"extra_body":{"n":2}}`, `{"duration":4.5}`, `{"duration":"oops"}`, `{"_parameterTranslation":{}}`, `{"reference_images":["a","b","c","d","e"]}`} {
+	for _, body := range []string{`{"audio":{},"generate_audio":{}}`, `{"audio":true,"generate_audio":false}`, `{"duration":5,"seconds":7}`, `{"count":2}`, `{"extra_body":{"n":2}}`, `{"duration":4.5}`, `{"duration":"oops"}`, `{"_parameterTranslation":{}}`, `{"reference_images":["a","b","c","d","e"]}`} {
 		if _, err := meteorVideoBody([]byte(body)); err == nil {
 			t.Fatal("unsupported video body accepted", body)
 		}
 	}
-	body, err := meteorVideoBody([]byte(`{"model":"doubao-seedance-2.0-mini","seconds":"5","resolution_name":"720p","watermark":true}`))
+	body, err := meteorVideoBody([]byte(`{"model":"doubao-seedance-2.0-mini","prompt":"fixture","seconds":"5","resolution_name":"720p","watermark":true}`))
 	var accepted map[string]any
 	_ = json.Unmarshal(body, &accepted)
 	if err != nil || accepted["watermark"] != false || accepted["duration"] != float64(5) || accepted["resolution"] != "720p" {

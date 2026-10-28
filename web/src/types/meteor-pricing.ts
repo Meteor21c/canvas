@@ -32,6 +32,22 @@ export type MeteorCapabilities = {
     scenarios: PricingScenario[];
     retentionDays: number;
     notice: string;
+    videoInput?: MeteorVideoInputPolicy;
+    uploads?: MeteorUploadPolicy;
+};
+
+export type MeteorUploadPolicy = {
+    imageMaxBytes: number; videoMaxBytes: number; audioMaxBytes: number;
+    totalReferenceMaxBytes: number; policySource: "site"; metadataRequired: boolean;
+};
+
+export type MeteorVideoInputPolicy = {
+    modes: string[]; referenceTypes: string[]; firstFrame: boolean; lastFrame: boolean;
+    lastFrameRequiresFirst: boolean; framesWithReferences: boolean;
+    audioOnlyReferences: boolean; referenceVideoWithGeneratedAudio: boolean;
+    referenceDuration?: { min: number; max: number };
+    referenceLimits: { images: number; videos: number; audios: number; total: number };
+    validationNotice: string;
 };
 
 export type MeteorQuoteInput = {
