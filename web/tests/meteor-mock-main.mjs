@@ -19,12 +19,11 @@ const server = http.createServer((req, res) => {
     }
     if (!owner && !outsider) return send(res, null, 401);
     if (url.pathname === "/api/v1/auth/me") return send(res, { id: owner ? 1 : 2, email: owner ? "owner@example.invalid" : "outsider@example.invalid", role: owner ? "admin" : "user", status: "active", balance: 100, created_at: "2026-10-28T00:00:00Z" });
-    if (url.pathname === "/api/v1/canvas/access") return send(res, { enabled: true, allowed: owner });
-    if (url.pathname === "/api/v1/keys") return send(res, { total: 1, items: [{ id: 7, user_id: 1, group_id: 2, status: "active", name: "CI test key", key, quota: 100, quota_used: 0 }] });
+    if (url.pathname === "/api/v1/canvas/access") return send(res, { enabled: true, allowed: owner || outsider });
+    if (url.pathname === "/api/v1/keys") return send(res, { total: 1, items: [{ id: 7, user_id: owner ? 1 : 2, group_id: 2, status: "active", name: "CI test key", key, quota: 100, quota_used: 0 }] });
     if (url.pathname === "/api/v1/groups/available") return send(res, [{ id: 2, name: "CI images", platform: "openai", status: "active", allow_image_generation: true, allow_video_generation: true, rate_multiplier: 1, image_price_1k: 0.1, image_price_2k: 0.2, image_price_4k: 0.4 }]);
     if (url.pathname === "/api/v1/groups/rates") return send(res, { "2": 1 });
-    if (url.pathname === "/api/v1/admin/groups/2") {
-        if (!owner) return send(res, null, 403);
+    if (url.pathname === "/api/v1/groups/2/creative-pricing") {
         return send(res, { id: 2, model_pricing: [] });
     }
     // The selected image group is intentionally absent from the display plaza.

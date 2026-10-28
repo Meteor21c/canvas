@@ -31,7 +31,12 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	if request.ChannelMode != "local" && !UserCanUseRemoteModelChannel(user) {
 		return WorkflowAgentDraftResponse{}, safeMessageError{message: "当前账号未开放云端渠道"}
 	}
-	channel, err := workflowDraftChannel(request, modelName)
+	var channel model.ModelChannel
+	if MeteorEnabled() {
+		channel, err = MeteorSelectChannel(user.ID, modelName, request.ChannelID)
+	} else {
+		channel, err = workflowDraftChannel(request, modelName)
+	}
 	if err != nil {
 		return WorkflowAgentDraftResponse{}, err
 	}

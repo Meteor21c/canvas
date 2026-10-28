@@ -2,7 +2,7 @@
 
 import type { CSSProperties, RefObject } from "react";
 import { Avatar, Dropdown, Tooltip } from "antd";
-import { Keyboard, LogOut, Settings2 } from "lucide-react";
+import { ArrowLeft, Keyboard, LogOut, Settings2 } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
@@ -50,6 +50,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
             { key: "source", label: <a href="/studio/source" target="_blank" rel="noreferrer">开源代码与许可</a> },
         ] : []),
         { key: "main-site", label: <a href="/">流星 API</a> },
+        ...(showConfig ? [{ key: "config", icon: <Settings2 className="size-4" />, label: "创作设置", onClick: () => openConfigDialog(false) }] : []),
         ...(onOpenShortcuts ? [{ key: "shortcuts", icon: <Keyboard className="size-4" />, label: "快捷键", onClick: onOpenShortcuts }] : []),
         { type: "divider" },
         { key: "logout", icon: <LogOut className="size-4" />, label: "返回控制台", onClick: logout },
@@ -57,12 +58,16 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
+            <a href="/" className="mr-1 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-current/20 px-2.5 text-xs font-medium transition hover:bg-current/5" style={iconStyle} aria-label="返回流星 API">
+                <ArrowLeft className="size-3.5" />
+                <span>返回流星 API</span>
+            </a>
             {showConfig ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
+                <button type="button" className={cn(naturalIconClass, "hidden md:inline-flex")} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "canvas" && "hidden lg:inline-flex")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
+            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "canvas" ? "hidden lg:inline-flex" : "hidden md:inline-flex")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
             <VersionReleaseModal
                 className={variant === "default" ? "hidden shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 sm:inline-flex dark:text-stone-400 dark:hover:text-white" : "hidden xl:inline-flex"}
                 style={versionStyle}

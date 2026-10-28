@@ -41,7 +41,7 @@ func MeteorBoundary(c *gin.Context) {
 	}
 	user, err := service.MeteorAuthenticate(c.Request.Context(), strings.TrimSpace(parts[1]))
 	if err != nil {
-		handler.FailWithStatus(c.Writer, http.StatusUnauthorized, "请使用站点所有者账号登录流星 API")
+		handler.FailWithStatus(c.Writer, http.StatusUnauthorized, "请返回流星 API 登录有效账户后重试")
 		c.Abort()
 		return
 	}

@@ -2,7 +2,7 @@ name: Meteor canvas v0.8.2
 
 on:
   push:
-    branches: ["meteor/**"]
+    branches: ["meteor/**", "codex/studio-public-users-20261028"]
   workflow_dispatch:
 
 permissions:

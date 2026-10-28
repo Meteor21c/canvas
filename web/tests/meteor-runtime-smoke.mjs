@@ -19,7 +19,7 @@ for (const path of ["auth/login", "auth/register", "auth/linux-do/authorize", "a
 }
 for (const path of ["auth/me", "settings", "v1/canvas/projects", "v1/meteor/capabilities?kind=image", "files/not-present/content", "proxy-image?url=http://127.0.0.1"]) {
     const r = await fetch(`${base}/studio/api/${path}`);
-    assert.ok([401, 403].includes(r.status), `${path} must require site owner: ${r.status}`);
+    assert.ok([401, 403].includes(r.status), `${path} must require a valid account: ${r.status}`);
 }
 const settings = await (await fetch(`${base}/studio/api/settings`, { headers: owner })).json();
 assert.equal(settings.data.storage.retentionDays, 7);
@@ -70,7 +70,8 @@ const meResponse = await fetch(`${base}/studio/api/auth/me`, { headers: owner })
 assert.equal(meResponse.status, 200); const me = await meResponse.json();
 assert.equal(me.code, 0); assert.equal(String(me.data.id), "meteor_user_1");
 const outsider = await fetch(`${base}/studio/api/auth/me`, { headers: { Authorization: "Bearer meteor-ci-outsider" } });
-assert.ok([401, 403].includes(outsider.status));
+assert.equal(outsider.status, 200);
+assert.equal((await outsider.json()).data.id, "meteor_user_2");
 for (const path of ["settings", "v1/user-config"]) {
     const r = await fetch(`${base}/studio/api/${path}`, { headers: owner });
     assert.equal(r.status, 200, path); const text = await r.text();
@@ -81,4 +82,4 @@ const html = await (await fetch(`${base}/studio`)).text();
 const asset = html.match(/src="(\/studio\/_next\/static\/[^"<>]+\.js[^"<>]*)"/);
 assert.ok(asset, "HTML must reference /studio-prefixed compiled JS");
 assert.equal((await fetch(new URL(asset[1].replaceAll("&amp;", "&"), base))).status, 200);
-console.log("Workspace, owner API, 7-day retention, live pricing contract and parameter limits verified without generation");
+console.log("Workspace, customer API, 7-day retention, live pricing contract and parameter limits verified without generation");

@@ -116,7 +116,7 @@ func MeteorAuthenticate(ctx context.Context, token string) (model.AuthUser, erro
 	var access struct {
 		Allowed bool `json:"allowed"`
 	}
-	if meteorGet(ctx, "/api/v1/auth/me", token, &me) != nil || me.ID <= 0 || me.Role != "admin" || me.Status != "active" || meteorGet(ctx, "/api/v1/canvas/access", token, &access) != nil || !access.Allowed {
+	if meteorGet(ctx, "/api/v1/auth/me", token, &me) != nil || me.ID <= 0 || (me.Role != "admin" && me.Role != "user") || me.Status != "active" || meteorGet(ctx, "/api/v1/canvas/access", token, &access) != nil || !access.Allowed {
 		return model.AuthUser{}, ErrMeteorSession
 	}
 	id := "meteor_user_" + strconv.FormatInt(me.ID, 10)
@@ -125,7 +125,7 @@ func MeteorAuthenticate(ctx context.Context, token string) (model.AuthUser, erro
 		return model.AuthUser{}, ErrMeteorSession
 	}
 	if !found {
-		user = model.User{ID: id, Username: id, DisplayName: "流星站主", Role: model.UserRoleUser, Status: model.UserStatusActive, AffCode: id, CreatedAt: now(), UpdatedAt: now()}
+		user = model.User{ID: id, Username: id, DisplayName: "流星用户", Role: model.UserRoleUser, Status: model.UserStatusActive, AffCode: id, CreatedAt: now(), UpdatedAt: now()}
 		if _, err = repository.SaveUser(user); err != nil {
 			return model.AuthUser{}, ErrMeteorSession
 		}
@@ -325,17 +325,7 @@ func MeteorSelectChannel(userID, modelName, channelID string) (model.ModelChanne
 }
 
 func MeteorSelectAnyChannel(modelName, channelID string) (model.ModelChannel, error) {
-	meteorSessions.Lock()
-	ids := []string{}
-	for id := range meteorSessions.byUser {
-		ids = append(ids, id)
-	}
-	meteorSessions.Unlock()
-	for _, id := range ids {
-		if channel, err := MeteorSelectChannel(id, modelName, channelID); err == nil {
-			return channel, nil
-		}
-	}
+	// Account-free selection must never charge an arbitrary active session.
 	return model.ModelChannel{}, ErrMeteorSession
 }
 

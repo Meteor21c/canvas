@@ -122,7 +122,7 @@ func TestMeteorActualImageGroupOutsidePlazaQuotesEverySizeAndCount(t *testing.T)
 			fmt.Fprint(w, `{"code":0,"data":[{"id":5,"rate_multiplier":2,"image_rate_independent":false,"image_rate_multiplier":1.2,"allow_image_generation":true,"image_price_1k":0.1,"image_price_2k":0.2,"image_price_4k":0.4}]}`)
 		case "/api/v1/groups/rates":
 			fmt.Fprint(w, `{"code":0,"data":{"5":0.5}}`)
-		case "/api/v1/admin/groups/5":
+		case "/api/v1/groups/5/creative-pricing":
 			fmt.Fprint(w, `{"code":0,"data":{"id":5,"model_pricing":[],"provider":"private-provider","upstream_cost":123}}`)
 		default:
 			t.Fatal("fixed group image prices must not depend on display plaza", r.URL.Path)
@@ -155,7 +155,7 @@ func TestMeteorExplicitGroupModelPriceBeatsGeneralImagePrice(t *testing.T) {
 			fmt.Fprint(w, `{"code":0,"data":[{"id":5,"rate_multiplier":2,"image_rate_independent":true,"image_rate_multiplier":1.2,"image_price_1k":0.1}]}`)
 		case "/api/v1/groups/rates":
 			fmt.Fprint(w, `{"code":0,"data":{"5":0.5}}`)
-		case "/api/v1/admin/groups/5":
+		case "/api/v1/groups/5/creative-pricing":
 			fmt.Fprint(w, `{"code":0,"data":{"model_pricing":[{"models":["gpt-image-*"],"billing_mode":"per_request","per_request_price":9},{"models":["gpt-image-2"],"billing_mode":"token","input_price":0.000005,"image_output_price":0.00003},{"models":["seedream-*"],"billing_mode":"per_request","per_request_price":0.9}]}}`)
 		default:
 			t.Fatal("unexpected pricing source", r.URL.Path)
@@ -178,7 +178,7 @@ func TestMeteorConfiguredImagePriceDoesNotIgnoreUnknownOverride(t *testing.T) {
 			fmt.Fprint(w, `{"code":0,"data":[{"id":5,"rate_multiplier":1,"image_price_1k":0.1}]}`)
 		case "/api/v1/groups/rates":
 			fmt.Fprint(w, `{"code":0,"data":{}}`)
-		case "/api/v1/admin/groups/5":
+		case "/api/v1/groups/5/creative-pricing":
 			w.WriteHeader(http.StatusForbidden)
 		default:
 			t.Fatal("must not substitute unrelated prices when override cannot be verified")

@@ -5253,7 +5253,7 @@ function CanvasTopBar({
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-[90] flex h-16 items-center justify-between gap-2 bg-background/95 px-3 backdrop-blur-sm sm:px-4" data-canvas-header>
                 <div className="pointer-events-auto flex min-w-0 items-center gap-1 sm:gap-3">
                     <button type="button" onClick={onProjects} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}><Images className="size-3.5" /><span>我的画布</span></button>
-                    <button type="button" onClick={onHome} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs" style={{ color: theme.node.text }}><Home className="size-3.5" /><span>首页</span></button>
+                    <button type="button" onClick={onHome} className="hidden h-9 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs sm:inline-flex" style={{ color: theme.node.text }}><Home className="size-3.5" /><span>首页</span></button>
                     <button type="button" onClick={onToggleSidePanel} className="hidden size-7 place-items-center rounded-full transition hover:bg-black/5 md:grid dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={sidePanelOpen ? "收起左侧面板" : "展开左侧面板"}>
                         {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
                     </button>

@@ -544,13 +544,12 @@ func meteorActualImagePricing(ctx context.Context, token string, groupID int64, 
 		prices := map[string]*float64{"1K": actual.Price1K, "2K": actual.Price2K, "4K": actual.Price4K}
 		hasSizePrice := prices[meteorImageTier(input.Resolution, input.Size)] != nil
 		group := actual.meteorPlazaGroup
-		// Canvas is restricted to the authenticated site owner. Read only the
-		// pricing-rule fields from that owner's selected group; other admin
-		// fields (including operating costs) are never decoded or returned.
+		// The user endpoint authorizes this account's available group and returns
+		// only sale-price rules; no administrator credentials are required.
 		var configured struct {
 			Pricing []meteorGroupImageOverride `json:"model_pricing"`
 		}
-		if meteorGet(ctx, "/api/v1/admin/groups/"+strconv.FormatInt(groupID, 10), token, &configured) != nil {
+		if meteorGet(ctx, "/api/v1/groups/"+strconv.FormatInt(groupID, 10)+"/creative-pricing", token, &configured) != nil {
 			return group, hasSizePrice
 		}
 		match := meteorMatchGroupImageOverride(configured.Pricing, input.Model)

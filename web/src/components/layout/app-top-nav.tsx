@@ -28,7 +28,7 @@ export function AppTopNav() {
                         <div className="flex min-w-0 items-center">
                             <Link href="/" className="flex h-full shrink-0 items-center gap-2 text-sm font-semibold leading-none tracking-tight text-stone-950 transition hover:text-stone-600 dark:text-stone-100 dark:hover:text-stone-300">
                                 <span
-                                    className="size-5 shrink-0 bg-current"
+                                    className="hidden size-5 shrink-0 bg-current sm:block"
                                     style={{
                                         mask: "url(/studio/logo.svg) center / contain no-repeat",
                                         WebkitMask: "url(/studio/logo.svg) center / contain no-repeat",

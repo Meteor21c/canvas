@@ -16,7 +16,7 @@ import (
 )
 
 // The mock exposes only read endpoints. No generation route exists.
-func TestMeteorOwnerIdentityAndKeyBoundary(t *testing.T) {
+func TestMeteorCustomerIdentityAndKeyBoundary(t *testing.T) {
 	previous := config.Cfg
 	config.Cfg = config.Config{MeteorMode: true, StorageDriver: "sqlite", DatabaseDSN: ":memory:"}
 	meteorSessions.Lock()
@@ -43,7 +43,7 @@ func TestMeteorOwnerIdentityAndKeyBoundary(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/auth/me":
 			role, status := "admin", "active"
-			if token == "ci-not-admin" {
+			if token == "ci-customer" {
 				role = "user"
 			}
 			if token == "ci-disabled" {
@@ -74,14 +74,14 @@ func TestMeteorOwnerIdentityAndKeyBoundary(t *testing.T) {
 	}))
 	defer server.Close()
 	config.Cfg.MeteorAPIBase = server.URL
-	for _, token := range []string{"ci-not-admin", "ci-disabled", "ci-not-owner"} {
+	for _, token := range []string{"ci-disabled", "ci-not-owner"} {
 		if _, err := MeteorAuthenticate(context.Background(), token); !errors.Is(err, ErrMeteorSession) {
 			t.Fatalf("unqualified identity accepted: %s, %v", token, err)
 		}
 	}
-	user, err := MeteorAuthenticate(context.Background(), "ci-owner-token")
+	user, err := MeteorAuthenticate(context.Background(), "ci-customer")
 	if err != nil || user.ID != "meteor_user_4242" || user.Role != model.UserRoleUser {
-		t.Fatalf("owner identity not safely mapped: %+v, %v", user, err)
+		t.Fatalf("customer identity not safely mapped: %+v, %v", user, err)
 	}
 	public, err := MeteorPublicChannels(user.ID)
 	if err != nil || len(public) != 1 || public[0].ID != "meteor-key-7" {
@@ -91,7 +91,7 @@ func TestMeteorOwnerIdentityAndKeyBoundary(t *testing.T) {
 	if strings.Contains(string(encoded), key) || strings.Contains(string(encoded), "127.0.0.1") || public[0].BaseURL != "" {
 		t.Fatal("public model catalog exposed key or private gateway")
 	}
-	for _, raw := range []string{`{"nodes":[{"api_key":"secret"}]}`, `{"nodes":[{"url":"data:image/png;base64,aaaa"}]}`, `{"text":"ci-owner-token"}`, `{"text":"ci-owner-key-do-not-serialize"}`} {
+	for _, raw := range []string{`{"nodes":[{"api_key":"secret"}]}`, `{"nodes":[{"url":"data:image/png;base64,aaaa"}]}`, `{"text":"ci-customer"}`, `{"text":"ci-owner-key-do-not-serialize"}`} {
 		if MeteorValidateMetadata([]byte(raw)) == nil {
 			t.Fatal("project accepted credential or inline media")
 		}
