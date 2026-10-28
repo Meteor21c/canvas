@@ -125,11 +125,11 @@ function ModelIcon({ model }: { model: string }) {
 
 function resolveModelIcon(model: string) {
     const name = model.toLowerCase();
-    if (name.includes("claude") || name.includes("anthropic")) return "/icons/claude.svg";
-    if (name.includes("gemini") || name.includes("google")) return "/icons/gemini.svg";
-    if (name.includes("gpt") || name.includes("openai")) return "/icons/openai.svg";
-    if (name.includes("grok") || name.includes("grok")) return "/icons/grok.svg";
-    if (name.includes("deepseek") || name.includes("deepseek")) return "/icons/deepseek.svg";
-    if (name.includes("glm") || name.includes("glm")) return "/icons/glm.svg";
+    if (name.includes("claude") || name.includes("anthropic")) return "/studio/icons/claude.svg";
+    if (name.includes("gemini") || name.includes("google")) return "/studio/icons/gemini.svg";
+    if (name.includes("gpt") || name.includes("openai")) return "/studio/icons/openai.svg";
+    if (name.includes("grok") || name.includes("grok")) return "/studio/icons/grok.svg";
+    if (name.includes("deepseek") || name.includes("deepseek")) return "/studio/icons/deepseek.svg";
+    if (name.includes("glm") || name.includes("glm")) return "/studio/icons/glm.svg";
     return "";
 }

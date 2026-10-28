@@ -12,7 +12,7 @@ for (let attempt = 0; attempt < 30; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 assert.equal(healthy, true, "frontend process must start with read-only root and bounded memory");
-for (const path of ["/studio/canvas", "/studio/source", "/studio/LICENSE.txt"]) {
+for (const path of ["/studio/canvas", "/studio/source", "/studio/LICENSE.txt", "/studio/icons/openai.svg"]) {
     const response = await fetch(`${base}${path}`);
     assert.equal(response.status, 200, path);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff", path);
