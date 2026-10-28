@@ -44,7 +44,7 @@ function usesAccountProxy(config: AiConfig) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (usesAccountProxy(config)) return `/api/v1${path}`;
+    if (usesAccountProxy(config)) return `/studio/api/v1${path}`;
     const channel = localChannelForActiveModel(config);
     return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
 }
@@ -109,7 +109,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, r
             const body = usesAccountProxy(config) ? { model, ...nativeBody } : nativeBody;
             const channel = localChannelForActiveModel(config);
             const response = await axios.post<GeminiAudioResponse>(
-                usesAccountProxy(config) ? "/api/v1/audio/speech" : geminiActionUrl(channel?.baseUrl || config.baseUrl, model, "generateContent"),
+                usesAccountProxy(config) ? "/studio/api/v1/audio/speech" : geminiActionUrl(channel?.baseUrl || config.baseUrl, model, "generateContent"),
                 body,
                 { headers: usesAccountProxy(config) ? { ...aiHeaders(config), ...(signal ? { "X-Canvas-Node-Request": "true" } : {}) } : geminiDirectHeaders(config), signal },
             );
@@ -188,7 +188,7 @@ export async function createCanvasAudioTask(config: AiConfig, prompt: string, op
     };
     options.signal?.throwIfAborted();
     options.onServerTask?.();
-    const response = await fetch("/api/v1/canvas/audio-tasks", request);
+    const response = await fetch("/studio/api/v1/canvas/audio-tasks", request);
     if (!response.ok) throw new Error(await readFetchError(response, "音频任务创建失败"));
     const payload = (await response.json()) as { code?: number; msg?: string; data?: CanvasAudioTask };
     if (payload.code !== 0 || !payload.data) throw new Error(payload.msg || "音频任务创建失败");
@@ -225,7 +225,7 @@ async function audioTranslationInput(config: AiConfig, model: string, prompt: st
 export async function pollCanvasAudioTaskStatus(taskId: string, signal?: AbortSignal): Promise<CanvasAudioTask> {
     const token = useUserStore.getState().token;
     if (!token) throw new Error("请先登录后再使用云端渠道");
-    const response = await fetch(`/api/v1/canvas/audio-tasks/${encodeURIComponent(taskId)}`, {
+    const response = await fetch(`/studio/api/v1/canvas/audio-tasks/${encodeURIComponent(taskId)}`, {
         signal,
         headers: { Authorization: `Bearer ${token}` },
     });

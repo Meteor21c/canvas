@@ -1,0 +1,39 @@
+services:
+  canvas:
+    image: ${CANVAS_IMAGE:?set a verified immutable image digest}
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 768m
+    cpus: "0.75"
+    pids_limit: 140
+    tmpfs:
+      - /tmp:size=48m,mode=1777
+      - /app/web/.next/cache:size=32m,uid=1000,gid=1000
+    volumes:
+      - ${CANVAS_DATA_DIR:-/opt/meteor-canvas/data-v082}:/app/data
+    ports:
+      - "127.0.0.1:3010:3000"
+    networks: [sub2api]
+    environment:
+      METEOR_MODE: "true"
+      METEOR_API_BASE: http://sub2api:8080
+      DATABASE_DSN: /app/data/infinite-canvas.db
+      PROMPT_DATA_DIR: /app/data/prompts
+      AI_LOG_DIR: /app/data/logs/ai-calls
+      NODE_OPTIONS: --max-old-space-size=320
+      GOMEMLIMIT: 224MiB
+      GOMAXPROCS: "2"
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+networks:
+  sub2api:
+    external: true
+    name: meteor-cutover-live-sub2api

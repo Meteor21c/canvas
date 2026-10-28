@@ -15,6 +15,9 @@ type adminChannelActionRequest struct {
 }
 
 func Settings(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		user,_:=service.UserFromContext(r.Context());settings,err:=service.MeteorSettings(user.ID);if err!=nil{FailError(w,err);return};OK(w,settings);return
+	}
 	settings, err := service.PublicSettings()
 	if err != nil {
 		FailError(w, err)

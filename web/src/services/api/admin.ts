@@ -62,43 +62,43 @@ export type AdminUserQuery = {
 };
 
 export async function fetchAdminUsers(token: string, query: AdminUserQuery = {}) {
-    return apiGet<AdminUserListResponse>("/api/admin/users", compactApiParams(query), token);
+    return apiGet<AdminUserListResponse>("/studio/api/admin/users", compactApiParams(query), token);
 }
 
 export async function saveAdminUser(token: string, user: Partial<AdminUser> & { password?: string }) {
-    return apiPost<AdminUser>("/api/admin/users", user, token);
+    return apiPost<AdminUser>("/studio/api/admin/users", user, token);
 }
 
 export async function adjustAdminUserCredits(token: string, id: string, credits: number) {
-    return apiPost<AdminUser>(`/api/admin/users/${encodeURIComponent(id)}/credits`, { credits }, token);
+    return apiPost<AdminUser>(`/studio/api/admin/users/${encodeURIComponent(id)}/credits`, { credits }, token);
 }
 
 export async function deleteAdminUser(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/users/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/admin/users/${encodeURIComponent(id)}`, token);
 }
 
 export async function fetchAdminCreditLogs(token: string, query: AdminUserQuery & { date?: string } = {}) {
-    return apiGet<AdminCreditLogListResponse>("/api/admin/credit-logs", compactApiParams(query), token);
+    return apiGet<AdminCreditLogListResponse>("/studio/api/admin/credit-logs", compactApiParams(query), token);
 }
 
 export async function saveAdminCreditLog(token: string, log: Partial<AdminCreditLog>) {
-    return apiPost<AdminCreditLog>("/api/admin/credit-logs", log, token);
+    return apiPost<AdminCreditLog>("/studio/api/admin/credit-logs", log, token);
 }
 
 export async function deleteAdminCreditLog(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/admin/credit-logs/${encodeURIComponent(id)}`, token);
 }
 
 export async function fetchAdminPromptCategories(token: string) {
-    return apiGet<AdminPromptCategory[]>("/api/admin/prompt-categories", undefined, token);
+    return apiGet<AdminPromptCategory[]>("/studio/api/admin/prompt-categories", undefined, token);
 }
 
 export async function syncAdminPromptCategory(token: string, category: string) {
-    return apiPost<AdminPromptCategory[]>("/api/admin/prompt-categories/sync", { category }, token);
+    return apiPost<AdminPromptCategory[]>("/studio/api/admin/prompt-categories/sync", { category }, token);
 }
 
 export async function syncAdminPromptCategoriesAll(token: string) {
-    return apiPost<AdminPromptCategory[]>("/api/admin/prompt-categories/sync-all", {}, token);
+    return apiPost<AdminPromptCategory[]>("/studio/api/admin/prompt-categories/sync-all", {}, token);
 }
 
 export type AdminPromptQuery = {
@@ -130,35 +130,35 @@ export type AdminAssetListResponse = {
 };
 
 export async function fetchAdminPrompts(token: string, query: AdminPromptQuery = {}) {
-    return apiGet<PromptListResponse>("/api/admin/prompts", compactApiParams(query), token);
+    return apiGet<PromptListResponse>("/studio/api/admin/prompts", compactApiParams(query), token);
 }
 
 export async function saveAdminPrompt(token: string, prompt: Partial<Prompt>) {
-    return apiPost<Prompt>("/api/admin/prompts", prompt, token);
+    return apiPost<Prompt>("/studio/api/admin/prompts", prompt, token);
 }
 
 export async function deleteAdminPrompt(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/prompts/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/admin/prompts/${encodeURIComponent(id)}`, token);
 }
 
 export async function deleteAdminPrompts(token: string, ids: string[]) {
-    return apiPost<boolean>("/api/admin/prompts/batch-delete", { ids }, token);
+    return apiPost<boolean>("/studio/api/admin/prompts/batch-delete", { ids }, token);
 }
 
 export function fetchAdminAgentSkills(token: string) {
-    return apiGet<AgentSkill[]>("/api/admin/agent-skills", undefined, token);
+    return apiGet<AgentSkill[]>("/studio/api/admin/agent-skills", undefined, token);
 }
 
 export function saveAdminAgentSkill(token: string, skill: Partial<AgentSkill>) {
-    return apiPost<AgentSkill>("/api/admin/agent-skills", skill, token);
+    return apiPost<AgentSkill>("/studio/api/admin/agent-skills", skill, token);
 }
 
 export function fetchAdminAgentSkillFiles(token: string, id: string) {
-    return apiGet<AgentSkillFile[]>(`/api/admin/agent-skills/${encodeURIComponent(id)}/files`, undefined, token);
+    return apiGet<AgentSkillFile[]>(`/studio/api/admin/agent-skills/${encodeURIComponent(id)}/files`, undefined, token);
 }
 
 export function deleteAdminAgentSkill(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/agent-skills/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/admin/agent-skills/${encodeURIComponent(id)}`, token);
 }
 
 export type AdminAssetQuery = {
@@ -170,15 +170,15 @@ export type AdminAssetQuery = {
 };
 
 export async function fetchAdminAssets(token: string, query: AdminAssetQuery = {}) {
-    return apiGet<AdminAssetListResponse>("/api/admin/assets", compactApiParams(query), token);
+    return apiGet<AdminAssetListResponse>("/studio/api/admin/assets", compactApiParams(query), token);
 }
 
 export async function saveAdminAsset(token: string, asset: Partial<AdminAsset>) {
-    return apiPost<AdminAsset>("/api/admin/assets", asset, token);
+    return apiPost<AdminAsset>("/studio/api/admin/assets", asset, token);
 }
 
 export async function deleteAdminAsset(token: string, id: string) {
-    return apiDelete<boolean>(`/api/admin/assets/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/admin/assets/${encodeURIComponent(id)}`, token);
 }
 
 export type AdminModelChannel = {
@@ -338,11 +338,11 @@ export type AdminAICallLogListResponse = {
 };
 
 export async function fetchAdminAICallLogs(token: string, query: AdminUserQuery = {}) {
-    return apiGet<AdminAICallLogListResponse>("/api/admin/ai-logs", compactApiParams(query), token);
+    return apiGet<AdminAICallLogListResponse>("/studio/api/admin/ai-logs", compactApiParams(query), token);
 }
 
 export async function deleteAdminAICallLogs(token: string, olderThanDays = 7) {
-    return apiDelete<{ removedFiles: number }>(`/api/admin/ai-logs?olderThanDays=${encodeURIComponent(String(olderThanDays))}`, token);
+    return apiDelete<{ removedFiles: number }>(`/studio/api/admin/ai-logs?olderThanDays=${encodeURIComponent(String(olderThanDays))}`, token);
 }
 
 export type AdminSettings = {
@@ -351,11 +351,11 @@ export type AdminSettings = {
 };
 
 export async function fetchAdminSettings(token: string) {
-    return apiGet<AdminSettings>("/api/admin/settings", undefined, token);
+    return apiGet<AdminSettings>("/studio/api/admin/settings", undefined, token);
 }
 
 export async function saveAdminSettings(token: string, settings: AdminSettings) {
-    return apiPost<AdminSettings>("/api/admin/settings", settings, token);
+    return apiPost<AdminSettings>("/studio/api/admin/settings", settings, token);
 }
 
 export type AdminChannelActionRequest = {
@@ -365,11 +365,11 @@ export type AdminChannelActionRequest = {
 };
 
 export async function fetchChannelModels(token: string, payload: AdminChannelActionRequest) {
-    return apiPost<string[]>("/api/admin/settings/channel-models", payload, token);
+    return apiPost<string[]>("/studio/api/admin/settings/channel-models", payload, token);
 }
 
 export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
-    return apiPost<string>("/api/admin/settings/channel-test", payload, token);
+    return apiPost<string>("/studio/api/admin/settings/channel-test", payload, token);
 }
 
 export type StorageCapacityResult = {
@@ -381,5 +381,5 @@ export type StorageCapacityResult = {
 };
 
 export async function measureAdminStorageProvider(token: string, payload: { index: number; provider: AdminStorageProvider }) {
-    return apiPost<StorageCapacityResult>("/api/admin/storage/measure", payload, token);
+    return apiPost<StorageCapacityResult>("/studio/api/admin/storage/measure", payload, token);
 }

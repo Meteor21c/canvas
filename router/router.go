@@ -1,6 +1,8 @@
 package router
 
 import (
+	"fmt"
+	"github.com/tigerowo/infinite-canvas/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,9 +11,18 @@ import (
 )
 
 func New() *gin.Engine {
-	router := gin.Default()
+	var router *gin.Engine
+	if service.MeteorEnabled() {
+		router = gin.New()
+		router.Use(gin.LoggerWithFormatter(func(p gin.LogFormatterParams) string {
+			return fmt.Sprintf("%s %s %d\n", p.Method, p.Request.URL.Path, p.StatusCode)
+		}), gin.Recovery())
+	} else {
+		router = gin.Default()
+	}
 	router.RedirectTrailingSlash = false
 	_ = router.SetTrustedProxies(nil)
+	router.Use(middleware.MeteorBoundary)
 	api := router.Group("/api")
 	api.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")

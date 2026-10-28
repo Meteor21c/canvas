@@ -390,7 +390,7 @@ async function requestGeminiCompletion(config: CanvasAgentAiConfig, systemPrompt
         ...(jsonSchema ? { generationConfig: { responseFormat: { text: { mimeType: "application/json", schema: jsonSchema } } } } : {}),
     };
     applyCanvasAgentReasoning(body, config, "gemini");
-    const proxy = Boolean(aiApiUrl(config, "/chat/completions").startsWith("/api/"));
+    const proxy = Boolean(aiApiUrl(config, "/chat/completions").startsWith("/studio/api/"));
     const channel = localChannelForActiveModel(config);
     const { model: _model, stream: _stream, ...nativeBody } = body;
     const response = await fetch(proxy ? aiApiUrl(config, "/chat/completions") : geminiActionUrl(channel?.baseUrl || config.baseUrl, config.model, config.textStreaming ? "streamGenerateContent" : "generateContent"), {

@@ -1,6 +1,6 @@
-import { apiGet, apiPost } from "@/services/api/request";
+import { apiGet } from "@/services/api/request";
 
-export const AUTH_TOKEN_KEY = "infinite-canvas-auth-token-v1";
+export const AUTH_TOKEN_KEY = "meteor-canvas:session-state-v082";
 
 export type UserRole = "guest" | "user" | "admin";
 
@@ -11,6 +11,7 @@ export type AuthUser = {
     avatarUrl: string;
     role: UserRole;
     credits: number;
+    balance?: number;
     createdAt: string;
     updatedAt: string;
 };
@@ -25,14 +26,16 @@ export type AuthPayload = {
     password: string;
 };
 
-export async function login(payload: AuthPayload) {
-    return apiPost<AuthSession>("/api/auth/login", payload);
+export async function login(payload: AuthPayload): Promise<AuthSession> {
+    void payload;
+    throw new Error("请通过流星 API 主站登录");
 }
 
-export async function register(payload: AuthPayload) {
-    return apiPost<AuthSession>("/api/auth/register", payload);
+export async function register(payload: AuthPayload): Promise<AuthSession> {
+    void payload;
+    throw new Error("请通过流星 API 主站注册");
 }
 
 export async function fetchCurrentUser(token?: string) {
-    return apiGet<AuthUser>("/api/auth/me", undefined, token);
+    return apiGet<AuthUser>("/studio/api/auth/me", undefined, token);
 }

@@ -277,7 +277,7 @@ export async function executeParameterTranslation(config: AiConfig, match: Match
     if (match.accountProxy) {
         const timeout = AbortSignal.timeout(match.timeout * 1000);
         const endpoint = input.kind === "audio" ? "/audio/speech" : Array.isArray(input.variables.images) && input.variables.images.length ? "/images/edits" : "/images/generations";
-        const response = await fetch(`/api/v1${endpoint}`, { method: "POST", headers: translationHeaders(config, match), body: JSON.stringify(translationBody(config, input)), signal: signal ? AbortSignal.any([timeout, signal]) : timeout });
+        const response = await fetch(`/studio/api/v1${endpoint}`, { method: "POST", headers: translationHeaders(config, match), body: JSON.stringify(translationBody(config, input)), signal: signal ? AbortSignal.any([timeout, signal]) : timeout });
         const data = response.headers.get("Content-Type")?.includes("json") ? await response.json() : await response.blob();
         if (!response.ok || (data.code && data.code !== 0)) throw new Error(data.msg || data.error?.message || `请求失败（${response.status}）`);
         const urls = data instanceof Blob ? [await readFileAsDataUrl(new File([data], "media", { type: data.type }))] : translationMediaURLs(data, input.kind);

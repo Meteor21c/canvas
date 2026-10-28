@@ -44,6 +44,7 @@ func NotFoundJSON(c *gin.Context) {
 }
 
 func authUser(c *gin.Context) (model.AuthUser, bool) {
+	if service.MeteorEnabled() { return service.UserFromContext(c.Request.Context()) }
 	token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	if strings.TrimSpace(token) == "" {
 		return model.AuthUser{}, false

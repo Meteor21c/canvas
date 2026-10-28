@@ -11,6 +11,8 @@ import (
 	"github.com/tigerowo/infinite-canvas/repository"
 )
 
+var ErrMeteorProjectConflict = repository.ErrMeteorProjectConflict
+
 type canvasProjectMetadata struct {
 	ID        string `json:"id"`
 	CreatedAt string `json:"createdAt"`
@@ -21,6 +23,14 @@ func canvasProjectFromRaw(
 	userID string,
 	raw json.RawMessage,
 ) (model.CanvasProject, error) {
+	if MeteorEnabled() {
+		if len(raw) > 1<<20 {
+			return model.CanvasProject{}, errors.New("单个画布项目不能超过1 MiB")
+		}
+		if err := MeteorValidateMetadata(raw); err != nil {
+			return model.CanvasProject{}, err
+		}
+	}
 	var metadata canvasProjectMetadata
 	if len(raw) == 0 || json.Unmarshal(raw, &metadata) != nil {
 		return model.CanvasProject{}, errors.New("画布项目数据无效")
@@ -86,6 +96,18 @@ func SaveCurrentUserCanvasProject(
 	if err != nil {
 		return nil, err
 	}
+	if MeteorEnabled() {
+		saved, err := repository.SaveMeteorCanvasProjects(user.ID, []model.CanvasProject{project}, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range saved {
+			if value.ID == project.ID {
+				return json.RawMessage(value.ProjectData), nil
+			}
+		}
+		return nil, ErrMeteorProjectConflict
+	}
 	saved, err := repository.SaveUserCanvasProject(project)
 	if err != nil {
 		return nil, err
@@ -105,15 +127,27 @@ func SyncCurrentUserCanvasProjects(
 		return nil, errors.New("请先登录")
 	}
 
+	if MeteorEnabled() && len(rawProjects) > 20 {
+		return nil, errors.New("最多同步20个画布")
+	}
+	seen := map[string]bool{}
 	projects := make([]model.CanvasProject, 0, len(rawProjects))
 	for _, raw := range rawProjects {
 		project, err := canvasProjectFromRaw(user.ID, raw)
 		if err != nil {
 			return nil, err
 		}
+		if MeteorEnabled() && seen[project.ID] {
+			return nil, errors.New("画布编号重复")
+		}
+		seen[project.ID] = true
 		projects = append(projects, project)
 	}
 
+	if MeteorEnabled() {
+		saved, err := repository.SaveMeteorCanvasProjects(user.ID, projects, true)
+		return canvasProjectData(saved), err
+	}
 	saved, err := repository.SaveUserCanvasProjects(user.ID, projects)
 	if err != nil {
 		return nil, err

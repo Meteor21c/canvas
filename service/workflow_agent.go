@@ -78,7 +78,7 @@ func DraftCreativeWorkflow(ctx context.Context, request WorkflowAgentDraftReques
 	SetModelChannelAuthHeader(httpRequest, channel)
 	httpRequest.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: time.Duration(maxInt(channel.Timeout, 600)) * time.Second}
+	client := HTTPClientForChannel(channel)
 	response, err := client.Do(httpRequest)
 	if err != nil {
 		refundCredits()
@@ -190,6 +190,9 @@ func workflowDraftModel(modelName string) (string, error) {
 }
 
 func workflowDraftChannel(request WorkflowAgentDraftRequest, modelName string) (model.ModelChannel, error) {
+	if MeteorEnabled() {
+		return MeteorSelectAnyChannel(modelName, request.ChannelID)
+	}
 	if request.ChannelMode == "local" {
 		channel := model.ModelChannel{
 			ID:       strings.TrimSpace(request.ChannelID),
@@ -339,5 +342,3 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
-
-

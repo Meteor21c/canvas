@@ -12,6 +12,8 @@ import (
 )
 
 type Config struct {
+	MeteorMode          bool   `env:"METEOR_MODE" envDefault:"false"`
+	MeteorAPIBase       string `env:"METEOR_API_BASE" envDefault:"http://host.docker.internal:3000"`
 	Port                string `env:"PORT" envDefault:"8080"`
 	AdminUsername       string `env:"ADMIN_USERNAME" envDefault:"admin"`
 	AdminPassword       string `env:"ADMIN_PASSWORD" envDefault:"infinite-canvas"`

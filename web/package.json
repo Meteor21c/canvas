@@ -5,7 +5,9 @@
     "type": "module",
     "scripts": {
         "dev": "next dev --webpack -H 0.0.0.0 -p 3000",
-        "build": "bun run build:bridge && next build",
+        "build": "next build",
+        "typecheck": "tsc --noEmit",
+        "test:meteor": "node --test tests/meteor-boundaries.test.mjs && bun test ./tests/meteor-proxy.test.ts ./tests/meteor-video.test.ts",
         "build:bridge": "bun ../canvas-agent/scripts/build-comfy-bridge.ts",
         "start": "next start",
         "format": "prettier --write .",

@@ -10,18 +10,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/repository"
 )
 
 const (
-	gptImage2RawBase             = "https://raw.githubusercontent.com/tigerowo/awesome-gpt-image-2-prompts/main"
-	awesomeGptImageRawBase       = "https://raw.githubusercontent.com/ZeroLu/awesome-gpt-image/main"
-	awesomeGpt4oImagePromptsBase = "https://raw.githubusercontent.com/ImgEdify/Awesome-GPT4o-Image-Prompts/main"
-	youMindGptImage2RawBase      = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-gpt-image-2/main"
-	youMindNanoBananaProRawBase  = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts/main"
+	gptImage2RawBase              = "https://raw.githubusercontent.com/tigerowo/awesome-gpt-image-2-prompts/main"
+	awesomeGptImageRawBase        = "https://raw.githubusercontent.com/ZeroLu/awesome-gpt-image/main"
+	awesomeGpt4oImagePromptsBase  = "https://raw.githubusercontent.com/ImgEdify/Awesome-GPT4o-Image-Prompts/main"
+	youMindGptImage2RawBase       = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-gpt-image-2/main"
+	youMindNanoBananaProRawBase   = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts/main"
 	xianyuAwesomeGptImage2RawBase = "https://raw.githubusercontent.com/xianyu110/awesome-gptimage2/main"
-	davidWuGptImage2RawBase      = "https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main"
+	davidWuGptImage2RawBase       = "https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main"
 )
 
 var gptImage2CaseFiles = []string{"README.md", "cases/ad-creative.md", "cases/character.md", "cases/comparison.md", "cases/ecommerce.md", "cases/portrait.md", "cases/poster.md", "cases/ui.md"}
@@ -77,6 +78,14 @@ func SyncPromptCategory(category string) ([]model.PromptCategory, error) {
 		if err != nil {
 			return nil, err
 		}
+		if config.Cfg.MeteorMode {
+			if len(items) == 0 {
+				return nil, errors.New("提示词源暂未返回可用内容")
+			}
+			if len(items) > 500 {
+				items = items[:500]
+			}
+		}
 		if err := repository.ReplacePromptCategory(item, items); err != nil {
 			return nil, err
 		}
@@ -116,8 +125,17 @@ func fetchText(baseURL, file string) (string, error) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", errors.New(file + " 拉取失败")
 	}
-	data, err := io.ReadAll(response.Body)
+	data, err := readPromptResponse(response.Body)
 	return string(data), err
+}
+
+func readPromptResponse(reader io.Reader) ([]byte, error) {
+	const maxPromptSourceBytes = 4 << 20
+	data, err := io.ReadAll(io.LimitReader(reader, maxPromptSourceBytes+1))
+	if err == nil && len(data) > maxPromptSourceBytes {
+		return nil, errors.New("提示词源超过大小限制")
+	}
+	return data, err
 }
 
 type gptImage2Case struct {

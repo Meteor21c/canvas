@@ -13,8 +13,9 @@ import { isKIEGrokVideoModel, isKIEKlingV3Config, kieKlingOmniVariant } from "./
 import { autoDLBaseUrl, getAutoDLCapabilities } from "@/lib/autodl";
 import { fetchAutoDLWorkflow } from "./autodl";
 import { isAgnesVideoV25Model, isCogVideoX3Model, isWan3VideoModel, modelKey, normalizeCogVideoX3Duration, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
-import { resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
-import { autoSyncToCloud, imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
+import { resolveMediaUrl, uploadMediaBlob, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
+import { autoSyncToCloud, imageToDataUrl, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { studioFetch } from "@/services/api/request";
 import { buildApiUrl, channelIdForActiveModel, channelProtocolForConfig, directAIProviderForConfig, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -46,7 +47,7 @@ function usesAccountProxy(config: AiConfig) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (usesAccountProxy(config)) return `/api/v1${path}`;
+    if (usesAccountProxy(config)) return `/studio/api/v1${path}`;
     const channel = localChannelForActiveModel(config);
     return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
 }
@@ -66,7 +67,7 @@ function aiVideoPollUrl(config: AiConfig, model: string, id: string) {
         return aiApiUrl(config, `/videos/${encodeURIComponent(id)}`);
     }
     if (usesAccountProxy(config)) {
-        return `/api/v1/videos/${encodeURIComponent(id)}`;
+        return `/studio/api/v1/videos/${encodeURIComponent(id)}`;
     }
     const channel = localChannelForActiveModel(config);
     const baseUrl = agnesBaseUrl(channel?.baseUrl || config.baseUrl);
@@ -180,7 +181,7 @@ async function createTranslatedVideoTask(config: AiConfig, match: MatchedTransla
         options.signal?.throwIfAborted();
         options.onServerTask?.();
         const clientTaskId = options.clientTaskId || `client_video_task_${nanoid()}`;
-        const response = await axios.post<Blob>("/api/v1/videos", translationBody(config, input), {
+        const response = await axios.post<Blob>("/studio/api/v1/videos", translationBody(config, input), {
             responseType: "blob",
             headers: {
                 ...translationHeaders(config, match),
@@ -317,7 +318,7 @@ async function syncGeneratedVideo(task: VideoResponse, config: AiConfig, content
 
 export async function listVideoGenerationTasks(config: AiConfig) {
     if (!usesAccountProxy(config)) return [];
-    const payload = (await axios.get<ApiVideoEnvelope>("/api/v1/video-tasks", { headers: aiHeaders(config) })).data;
+    const payload = (await axios.get<ApiVideoEnvelope>("/studio/api/v1/video-tasks", { headers: aiHeaders(config) })).data;
     if (payload.code !== 0) throw new VideoRequestError(payload.msg || payload.message || "读取视频任务失败", payload);
     return Array.isArray(payload.data) ? payload.data.map(normalizeVideoResponse) : [];
 }
@@ -326,7 +327,7 @@ export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoRe
     if (!usesAccountProxy(config) || !task) return;
     const id = task.id || task.task_id || task.video_id;
     if (!id) return;
-    const payload = (await axios.delete<ApiVideoEnvelope>(`/api/v1/video-tasks/${encodeURIComponent(id)}`, { headers: aiHeaders(config) })).data;
+    const payload = (await axios.delete<ApiVideoEnvelope>(`/studio/api/v1/video-tasks/${encodeURIComponent(id)}`, { headers: aiHeaders(config) })).data;
     if (payload.code !== 0) throw new VideoRequestError(payload.msg || payload.message || "删除视频任务失败", payload);
 }
 
@@ -392,7 +393,53 @@ async function createAgnesVideoV25RequestBody(config: AiConfig, model: string, p
     return body;
 }
 
-async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+export async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
+    if (videoChannelProtocol(config, model) === "sub2api") {
+        const imageReference = async (reference: ReferenceImage) => {
+            if (reference.storageKey?.startsWith("server:")) {
+                const url = await resolveImageUrl(reference.storageKey);
+                if (!url) throw new VideoRequestError("参考图缓存已过期，请重新上传");
+                return new URL(url, window.location.origin).href;
+            }
+            const uploaded = await uploadImage(await imageToDataUrl(reference));
+            if (!uploaded.storageKey.startsWith("server:")) throw new VideoRequestError("参考图尚未同步到本站，请重新上传后生成视频");
+            const url = await resolveImageUrl(uploaded.storageKey);
+            if (!url) throw new VideoRequestError("参考图同步失败，请重新上传");
+            return new URL(url, window.location.origin).href;
+        };
+        const mediaReference = async (reference: ReferenceVideo | ReferenceAudio) => {
+            let url = await resolveMediaUrl(reference.storageKey, reference.storageKey?.startsWith("server:") ? "" : reference.url);
+            if (!url) throw new VideoRequestError("参考视频或音频缓存已过期，请重新上传");
+            if (!reference.storageKey?.startsWith("server:")) {
+                const response = await studioFetch(url);
+                if (!response.ok) throw new VideoRequestError("读取参考视频或音频失败");
+                const uploaded = await uploadMediaBlob(await response.blob(), reference.name || "video-reference");
+                if (!uploaded.storageKey.startsWith("server:")) throw new VideoRequestError("参考素材尚未同步到本站，请重新上传后生成视频");
+                url = await resolveMediaUrl(uploaded.storageKey);
+            }
+            if (!url) throw new VideoRequestError("参考素材同步失败，请重新上传");
+            return new URL(url, window.location.origin).href;
+        };
+        const [images, firstFrame, lastFrame, videos, audios] = await Promise.all([
+            Promise.all(input.references.map(imageReference)),
+            input.firstFrame ? imageReference(input.firstFrame) : "",
+            input.lastFrame ? imageReference(input.lastFrame) : "",
+            Promise.all(input.videoReferences.map(mediaReference)),
+            Promise.all(input.audioReferences.map(mediaReference)),
+        ]);
+        const references = [...images, ...videos.map(url => `video:${url}`), ...audios.map(url => `audio:${url}`)];
+        return {
+            model, prompt,
+            duration: Number(config.videoSeconds),
+            resolution: normalizeVideoResolution(config.vquality),
+            aspect_ratio: normalizeSeedanceRatio(config.size),
+            mode: config.videoMode,
+            audio: boolConfig(config.videoGenerateAudio, false),
+            ...(references.length ? { reference_images: references } : {}),
+            ...(firstFrame ? { start_image_url: firstFrame } : {}),
+            ...(lastFrame ? { end_image_url: lastFrame } : {}),
+        };
+    }
     if (videoChannelProtocol(config, model) === "autodl") {
         const capabilities = getAutoDLCapabilities(await fetchAutoDLWorkflow(autoDLBaseUrl(config, model), model));
         if (!capabilities) throw new VideoRequestError("当前 AutoDL 工作流尚未适配");
@@ -982,7 +1029,7 @@ async function writeVideoAICallLog(config: AiConfig, model: string, endpoint: st
     const token = useUserStore.getState().token;
     if (!token) return;
     const channel = localChannelForActiveModel(config);
-    await fetch("/api/v1/ai-logs", {
+    await fetch("/studio/api/v1/ai-logs", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({

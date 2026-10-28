@@ -3,7 +3,7 @@ import { apiGet, apiPost } from "@/services/api/request";
 import { useUserStore } from "@/stores/use-user-store";
 
 export async function listCanvasProjects(token: string) {
-    return apiGet<CanvasProject[]>("/api/v1/canvas/projects", undefined, token);
+    return apiGet<CanvasProject[]>("/studio/api/v1/canvas/projects", undefined, token);
 }
 
 export async function saveCanvasProject(
@@ -11,8 +11,8 @@ export async function saveCanvasProject(
     project: CanvasProject,
 ) {
     return apiPost<CanvasProject>(
-        "/api/v1/canvas/projects",
-        { data: project },
+        "/studio/api/v1/canvas/projects",
+        { data: project, revision: project.revision || 0 },
         token,
     );
 }
@@ -22,7 +22,7 @@ export async function syncCanvasProjects(
     projects: CanvasProject[],
 ) {
     return apiPost<CanvasProject[]>(
-        "/api/v1/canvas/projects/sync",
+        "/studio/api/v1/canvas/projects/sync",
         { projects },
         token,
     );
@@ -31,7 +31,7 @@ export async function syncCanvasProjects(
 export async function stopCanvasTask(kind: "image" | "video" | "audio", id: string, workflow: boolean, source: "canvas" | "video-workbench" = "canvas") {
     const token = useUserStore.getState().token;
     if (!token) throw new Error("请先登录后再停止云端任务");
-    return apiPost<{ stopped: boolean }>("/api/v1/canvas/tasks/stop", { kind, id, workflow, source }, token);
+    return apiPost<{ stopped: boolean }>("/studio/api/v1/canvas/tasks/stop", { kind, id, workflow, source }, token);
 }
 
 export async function deleteCanvasProjects(ids: string[]) {
@@ -41,7 +41,7 @@ export async function deleteCanvasProjects(ids: string[]) {
     );
     if (!token || !projectIds.length) return;
     return apiPost<{ deleted: boolean }>(
-        "/api/v1/canvas/projects/delete",
+        "/studio/api/v1/canvas/projects/delete",
         { ids: projectIds },
         token,
     );

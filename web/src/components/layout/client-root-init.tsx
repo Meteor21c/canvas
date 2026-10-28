@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { App } from "antd";
 
+import { cleanupMeteorMedia, clearMeteorMediaSession } from "@/services/meteor-media-retention";
 import { fetchUserConfig } from "@/services/api/user-config";
 import { replaceWorkflowChannels } from "@/services/workflow-channel-storage";
 import { STORAGE_SYNC_FAILED_EVENT, defaultUserStorageProvider, defaultUserWebDAVStorageProvider, saveUserStorageProvider, saveUserWebDAVStorageProvider } from "@/services/image-storage";
@@ -14,7 +15,6 @@ import { useChannelTranslationStore } from "@/stores/use-channel-translation-sto
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
-    const handledConfigParams = useRef(false);
     const pathname = usePathname();
     const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
@@ -30,6 +30,14 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const accountSessionRef = useRef({ token, userId: user?.id || "" });
 
     useEffect(() => {
+        clearMeteorMediaSession();
+        if (!user) return;
+        void cleanupMeteorMedia();
+        const timer = window.setInterval(() => { void cleanupMeteorMedia(); }, 5 * 60 * 1000);
+        return () => { window.clearInterval(timer); clearMeteorMediaSession(); };
+    }, [user?.id]);
+
+    useEffect(() => {
         const onSyncFailed = (event: Event) => {
             const detail = (event as CustomEvent<string>).detail;
             message.warning({ key: STORAGE_SYNC_FAILED_EVENT, content: `云端同步失败，已保留原始素材${detail ? `：${detail}` : ""}` });
@@ -39,8 +47,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [message]);
 
     useEffect(() => {
-        void loadPublicSettings();
-    }, [loadPublicSettings]);
+        if (user) void loadPublicSettings().catch(() => {});
+    }, [loadPublicSettings, user?.id]);
 
     useEffect(() => {
         if (!isLoginPage) void hydrateUser();
@@ -120,28 +128,18 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [isTokenDanceCallback, token, updateConfig, user?.id]);
 
     useEffect(() => {
-        if (handledConfigParams.current) return;
-        const searchParams = new URLSearchParams(window.location.search);
-        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
-        const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
-        if (!baseUrl && !apiKey) return;
-        if (!publicSettings) return;
-        handledConfigParams.current = true;
-        searchParams.delete("baseUrl");
-        searchParams.delete("baseurl");
-        searchParams.delete("apiKey");
-        searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
-        if (!publicSettings.modelChannel.allowCustomChannel) {
-            openConfigDialog(false);
-            message.error("后台未允许用户自定义渠道，请联系管理员进行配置");
-            return;
+        const params = new URLSearchParams(window.location.search);
+        let changed = false;
+        for (const key of ["baseUrl", "baseurl", "apiKey", "apikey", "agentUrl", "agentToken"]) {
+            if (params.has(key)) { params.delete(key); changed = true; }
         }
-        updateConfig("channelMode", "local");
-        if (baseUrl) updateConfig("baseUrl", baseUrl);
-        if (apiKey) updateConfig("apiKey", apiKey);
-        openConfigDialog(false);
-    }, [message, openConfigDialog, publicSettings, updateConfig]);
+        if (changed) window.history.replaceState(null, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+        const refresh = () => { void hydrateUser(); };
+        const onStorage = (event: StorageEvent) => { if (event.key === "auth_token") refresh(); };
+        window.addEventListener("storage", onStorage);
+        window.addEventListener("focus", refresh);
+        return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("focus", refresh); };
+    }, [hydrateUser]);
 
     return <>{children}</>;
 }

@@ -125,7 +125,7 @@ export function CanvasDirector({
 
     return (
         <div className="fixed inset-0 z-[2000]">
-            <iframe ref={iframeRef} title="3D导演台" src="/director/index.html" className="block h-full w-full border-0" />
+            <iframe ref={iframeRef} title="3D导演台" src="/studio/director/index.html" className="block h-full w-full border-0" />
         </div>
     );
 }

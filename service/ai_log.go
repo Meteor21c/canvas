@@ -59,6 +59,7 @@ type AICallLogInput struct {
 }
 
 func SaveAICallLog(input AICallLogInput) {
+	if MeteorEnabled() { input.RequestBody=MeteorRedact(input.RequestBody);input.ResponseBody=MeteorRedact(input.ResponseBody);input.Error=MeteorRedact(input.Error) }
 	responseBody := normalizeAICallResponseLog(input.ResponseBody, input.Error)
 	failed := strings.TrimSpace(input.Error) != ""
 	failure := &failed

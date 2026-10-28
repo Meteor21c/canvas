@@ -89,6 +89,7 @@ func DB() (*gorm.DB, error) {
 			&model.AICallLog{},
 			&model.StorageObject{},
 			&model.VideoTask{},
+			&model.MeteorTaskReceipt{},
 			&model.VideoGenerationLog{},
 			&model.ImageGenerationLog{},
 			&model.CanvasImageTask{},

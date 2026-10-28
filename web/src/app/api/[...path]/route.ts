@@ -1,58 +1,52 @@
 import type { NextRequest } from "next/server";
+import { canvasApiTarget, isBlockedCanvasApi } from "@/lib/meteor-route-policy.mjs";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
-
-type RouteContext = {
-    params: Promise<{ path: string[] }>;
-};
-
-function proxyHeaders(request: NextRequest) {
-    const headers = new Headers(request.headers);
-    headers.delete("host");
-    headers.delete("content-length");
-    headers.delete("connection");
-    headers.delete("expect");
-    headers.set("x-forwarded-host", request.nextUrl.host);
-    headers.set("x-forwarded-proto", request.nextUrl.protocol.replace(":", ""));
-    return headers;
-}
-
-function responseHeaders(response: Response) {
-    const headers = new Headers(response.headers);
-    headers.delete("content-length");
-    headers.delete("content-encoding");
-    headers.delete("transfer-encoding");
-    return headers;
-}
+export const maxDuration = 600;
+type RouteContext = { params: Promise<{ path: string[] }> };
+const hopHeaders = ["host", "content-length", "connection", "expect", "transfer-encoding", "keep-alive", "upgrade", "proxy-authorization", "proxy-authenticate", "cookie"];
 
 async function proxy(request: NextRequest, context: RouteContext) {
     const { path } = await context.params;
-    const apiBaseUrl = process.env.API_BASE_URL || "http://127.0.0.1:8080";
-    const target = `${apiBaseUrl.replace(/\/$/, "")}/api/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
-    const hasBody = request.method !== "GET" && request.method !== "HEAD";
-
+    if (isBlockedCanvasApi(path)) return Response.json({ code: 1, data: null, msg: "此独立认证或管理接口已停用" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+    const target = canvasApiTarget(path, request.nextUrl.search);
+    const headers = new Headers(request.headers);
+    hopHeaders.forEach(name => headers.delete(name));
+    for (const name of [...headers.keys()]) if (name.startsWith("x-forwarded-") || name === "forwarded") headers.delete(name);
+    const hasBody = !["GET", "HEAD"].includes(request.method);
     try {
         const response = await fetch(target, {
-            method: request.method,
-            headers: proxyHeaders(request),
+            method: request.method, headers,
             body: hasBody ? request.body : undefined,
             duplex: hasBody ? "half" : undefined,
             redirect: "manual",
-            signal: request.headers.get("X-Canvas-Node-Request") === "true" ? request.signal : undefined,
+            signal: request.headers.get("X-Canvas-Node-Request") === "true" ? request.signal : AbortSignal.timeout(610000),
         } as RequestInit & { duplex?: "half" });
-
-        return new Response(response.body, {
-            status: response.status,
-            statusText: response.statusText,
-            headers: responseHeaders(response),
-        });
-    } catch (error) {
-        console.error("Failed to proxy", target, error);
-        return Response.json({ code: 1, data: null, msg: "接口连接失败，请确认后端服务已启动" }, { status: 502 });
+        // No internal redirect, cookie, service address or executable content
+        // policy is inherited from the original standalone backend.
+        if (response.status >= 300 && response.status < 400) {
+            void response.body?.cancel();
+            return Response.json({ code: 1, data: null, msg: "媒体接口返回了不可转发的重定向" }, { status: 502 });
+        }
+        const outgoing = new Headers(response.headers);
+        ["content-length", "content-encoding", "transfer-encoding", "connection", "set-cookie", "server"].forEach(name => outgoing.delete(name));
+        const mediaPath = path[0] === "proxy-image" || path[0] === "files" || (path[0] === "v1" && path.includes("content"));
+        if (mediaPath) {
+            const contentType = outgoing.get("Content-Type") || "";
+            if (/text\/html|image\/svg\+xml|(?:java|ecma)script/i.test(contentType)) {
+                void response.body?.cancel();
+                return Response.json({ code: 1, data: null, msg: "不支持作为媒体交付的文件类型" }, { status: 415 });
+            }
+            outgoing.set("Content-Security-Policy", "sandbox; default-src 'none'; frame-ancestors 'self'");
+        }
+        outgoing.set("Cache-Control", "no-store");
+        outgoing.set("X-Content-Type-Options", "nosniff");
+        return new Response(response.body, { status: response.status, headers: outgoing });
+    } catch {
+        // Never log targets/query strings: media signatures can be present.
+        return Response.json({ code: 1, data: null, msg: "创作服务暂时无法连接，请核对原任务后重试" }, { status: 502, headers: { "Cache-Control": "no-store" } });
     }
 }
-
 export const GET = proxy;
 export const HEAD = proxy;
 export const POST = proxy;

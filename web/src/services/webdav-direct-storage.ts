@@ -144,7 +144,7 @@ export async function directWebDAVMediaUrl(provider: UserWebDAVStorageProvider, 
     const config = { endpoint: provider.endpoint.replace(/\/+$/, ""), authorization: basicAuthorization(provider.username, provider.password) };
     mediaConfigs.set(configId, config);
     registration.active?.postMessage({ type: "webdav-media-config", id: configId, config });
-    return `/webdav-media/${encodeURIComponent(configId)}/${encodeURIComponent(objectKey)}`;
+    return `/studio/webdav-media/${encodeURIComponent(configId)}/${encodeURIComponent(objectKey)}`;
 }
 
 async function directWebDAVFetch(provider: UserWebDAVStorageProvider, objectKey: string, init: RequestInit) {
@@ -242,7 +242,7 @@ async function ensureMediaServiceWorker() {
         });
         serviceWorkerMessagesReady = true;
     }
-    serviceWorkerPromise ||= navigator.serviceWorker.register("/webdav-media-sw.js", { scope: "/" }).then(async (registration) => {
+    serviceWorkerPromise ||= navigator.serviceWorker.register("/studio/webdav-media-sw.js", { scope: "/studio/" }).then(async (registration) => {
         await navigator.serviceWorker.ready;
         if (!navigator.serviceWorker.controller) {
             await new Promise<void>((resolve) => {

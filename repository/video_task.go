@@ -100,7 +100,7 @@ func ListUserVideoTasks(userID string, source string, limit int) ([]model.VideoT
 		}
 	}
 	err = query.
-		Where("status IN ?", []string{"queued", "in_progress", "processing", "running"}).
+		Where("status IN ?", []string{"queued", "in_progress", "processing", "running", "pending", "asset_pending", "asset_reviewing", "submission_unknown", "completed", "failed"}).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&tasks).Error
@@ -124,7 +124,7 @@ func ListDueVideoTasks(limit int) ([]model.VideoTask, error) {
 		limit = 100
 	}
 	var tasks []model.VideoTask
-	err = db.Where("status IN ?", []string{"queued", "in_progress", "processing", "running", "unknown"}).Where("(workflow_ref = '' OR workflow_ref IS NULL)").
+	err = db.Where("status IN ?", []string{"queued", "in_progress", "processing", "running", "unknown", "pending", "asset_pending", "asset_reviewing"}).Where("(workflow_ref = '' OR workflow_ref IS NULL)").
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&tasks).Error

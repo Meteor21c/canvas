@@ -28,12 +28,9 @@ import {
 
 
 const HOME_BANNERS: HomeBanner[] = [
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.7/img/infinite-canvas/88.webp", videoUrl: "", linkUrl: "https://88api.ai/sign-up?aff=25ty", alt: "1" },
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.6/img/infinite-canvas/metaso.webp", videoUrl: "", linkUrl: "https://metaso.cn/minimax-h3/?s=tt", alt: "2" },
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.5/img/infinite-canvas/3ddirectortl.webp", videoUrl: "", linkUrl: "", alt: "3" },
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.4/img/infinite-canvas/agent.webp", videoUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.4/img/infinite-canvas/agent.webm", linkUrl: "", alt: "4" },
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.4/img/infinite-canvas/panorama.webp", videoUrl: "", linkUrl: "", alt: "5" },
-    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/cdn-tdeh@v0.4/img/infinite-canvas/3ddirector.webp", videoUrl: "", linkUrl: "", alt: "6" },
+    { imageUrl: "/studio/banners/meteor-canvas.svg", linkUrl: "/studio/canvas", alt: "无限画布，连接灵感" },
+    { imageUrl: "/studio/banners/meteor-image.svg", linkUrl: "/studio/image", alt: "让想法，成为画面" },
+    { imageUrl: "/studio/banners/meteor-video.svg", linkUrl: "/studio/video", alt: "把故事，交给时间" },
 ];
 
 function toPendingAgentAsset(payload: InsertAssetPayload, label: string): PendingAgentAsset {
@@ -167,11 +164,11 @@ export default function IndexPage() {
                         <div className="max-w-2xl text-center">
                             <div className="flex flex-wrap items-center justify-center gap-3">
                                 <h2 className="text-3xl font-semibold text-stone-950 dark:text-stone-100">沉淀每一次好结果</h2>
-                                <Button type="primary" size="middle" href="https://prompts.tdeh.top/" target="_blank" className="-translate-y-[6px]">提示词仓库</Button>
+                                <Button type="primary" size="middle" href="/studio/prompts" className="-translate-y-[6px]">提示词仓库</Button>
                             </div>
                             <p className="mt-3 text-base leading-7 text-stone-500 dark:text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
                         </div>
-                        <Button type="link" href="/prompts" className="justify-self-center md:justify-self-end" icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                        <Button type="link" href="/studio/prompts" className="justify-self-center md:justify-self-end" icon={<ArrowRight className="size-4" />} iconPlacement="end">
                             提示词库
                         </Button>
                     </div>

@@ -88,11 +88,11 @@ async function workflowRequest<T>(path: string, token: string, signal?: AbortSig
 }
 
 export function submitWorkflowTask(token: string, input: WorkflowRunInput, signal?: AbortSignal) {
-    return workflowRequest<WorkflowGenerationTask>("/api/v1/workflow-tasks", token, signal, input);
+    return workflowRequest<WorkflowGenerationTask>("/studio/api/v1/workflow-tasks", token, signal, input);
 }
 
 export function getWorkflowTask(token: string, id: string, signal?: AbortSignal) {
-    return workflowRequest<WorkflowGenerationTask>(`/api/v1/workflow-tasks/${encodeURIComponent(id)}`, token, signal);
+    return workflowRequest<WorkflowGenerationTask>(`/studio/api/v1/workflow-tasks/${encodeURIComponent(id)}`, token, signal);
 }
 
 export function comfyOutputStorageKey(url: string) {

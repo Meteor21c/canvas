@@ -1,4 +1,5 @@
 export const modelChannelProtocols = [
+    { value: "sub2api", label: "流星 API", baseUrl: "" },
     { value: "openai", label: "OpenAI", baseUrl: "https://api.openai.com" },
     { value: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com" },
     { value: "grok2api", label: "Grok2API", baseUrl: "" },

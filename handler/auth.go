@@ -90,6 +90,9 @@ func AdminLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func CurrentUser(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		user,ok:=service.UserFromContext(r.Context());if !ok {FailWithStatus(w,http.StatusUnauthorized,"请先登录流星 API");return};OK(w,user);return
+	}
 	if user, ok := service.UserFromContext(r.Context()); ok {
 		OK(w, user)
 		return

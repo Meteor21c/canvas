@@ -27,6 +27,10 @@ import (
 )
 
 func StopCanvasTask(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		FailWithStatus(w, 409, "此操作不能撤销上游已受理的付费请求，请等待任务结果；不会声明退款。")
+		return
+	}
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
 		Fail(w, "未登录或权限不足")
@@ -51,6 +55,17 @@ func StopCanvasTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func CreateCanvasImageTask(w http.ResponseWriter, r *http.Request) {
+	release, available := service.TryMeteorGeneration()
+	if !available {
+		FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+		return
+	}
+	asyncStarted := false
+	defer func() {
+		if !asyncStarted {
+			release()
+		}
+	}()
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
 		Fail(w, "未登录或权限不足")
@@ -95,13 +110,21 @@ func CreateCanvasImageTask(w http.ResponseWriter, r *http.Request) {
 		ContentType:     contentType,
 		RequestBody:     summarizeAIRequest(body, contentType),
 	})
+	if errors.Is(err, service.ErrMeteorTaskExists) {
+		OK(w, service.CanvasImageTaskResponse(task))
+		return
+	}
 	if err != nil {
 		log.Printf("create canvas image task failed: user=%s err=%v", user.ID, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	OK(w, service.CanvasImageTaskResponse(task))
-	go runCanvasImageTask(task, user, body, contentType, task.ChannelID, task.UserChannelID)
+	asyncStarted = true
+	go func() {
+		defer release()
+		runCanvasImageTask(task, user, body, contentType, task.ChannelID, task.UserChannelID)
+	}()
 }
 
 func GetCanvasImageTask(w http.ResponseWriter, r *http.Request, id string) {
@@ -179,6 +202,17 @@ func DeleteUserCanvasImageTask(w http.ResponseWriter, r *http.Request, id string
 }
 
 func CreateCanvasAudioTask(w http.ResponseWriter, r *http.Request) {
+	release, available := service.TryMeteorGeneration()
+	if !available {
+		FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+		return
+	}
+	asyncStarted := false
+	defer func() {
+		if !asyncStarted {
+			release()
+		}
+	}()
 	user, ok := service.UserFromContext(r.Context())
 	if !ok {
 		Fail(w, "未登录或权限不足")
@@ -221,13 +255,21 @@ func CreateCanvasAudioTask(w http.ResponseWriter, r *http.Request) {
 		ContentType:     contentType,
 		RequestBody:     summarizeAIRequest(body, contentType),
 	})
+	if errors.Is(err, service.ErrMeteorTaskExists) {
+		OK(w, service.CanvasAudioTaskResponse(task))
+		return
+	}
 	if err != nil {
 		log.Printf("create canvas audio task failed: user=%s err=%v", user.ID, err)
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	OK(w, service.CanvasAudioTaskResponse(task))
-	go runCanvasAudioTask(task, user, body, contentType, task.ChannelID, task.UserChannelID)
+	asyncStarted = true
+	go func() {
+		defer release()
+		runCanvasAudioTask(task, user, body, contentType, task.ChannelID, task.UserChannelID)
+	}()
 }
 
 func GetCanvasAudioTask(w http.ResponseWriter, r *http.Request, id string) {
@@ -294,11 +336,28 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Progress = 100
 	task.CompletedAt = taskTime()
 	task.ResponseBody = string(payload)
+	if service.MeteorEnabled() {
+		task.ResponseBody = "[media stored separately]"
+		for i, value := range imageURLs {
+			if value != "" {
+				object, storeErr := service.MeteorStoreGeneratedImage(service.WithUser(ctx, user), value)
+				if storeErr != nil {
+					saveFailedCanvasImageTask(task, "生成已完成，但临时素材保存失败，请在主站用量记录核实", storeErr.Error())
+					return
+				}
+				imageURLs[i] = object.StorageKey
+			}
+		}
+	}
 	task.ImageURL = imageURLs[0]
 	if collectAll {
 		task.ImageURLs = imageURLs
 	}
 	task.StorageKey = ""
+	if service.MeteorEnabled() && strings.HasPrefix(task.ImageURL, "server:") {
+		task.StorageKey = task.ImageURL
+		task.ImageURL = service.MeteorMediaURL(strings.TrimPrefix(task.StorageKey, "server:"))
+	}
 	task.MimeType = mimeType
 	task.Bytes = bytes
 	task.Width = 0
@@ -371,6 +430,15 @@ func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []
 	task.ResponseBody = "[binary audio]"
 	task.AudioURL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(payload)
 	task.StorageKey = ""
+	if service.MeteorEnabled() {
+		object, storeErr := service.UploadStorageObjectWithProvider(service.WithUser(ctx, user), "generated-audio", mimeType, payload, nil)
+		if storeErr != nil {
+			saveFailedCanvasAudioTask(task, "生成已完成，但素材保存失败", storeErr.Error())
+			return
+		}
+		task.AudioURL = object.URL
+		task.StorageKey = object.StorageKey
+	}
 	task.MimeType = mimeType
 	task.Bytes = int64(len(payload))
 	task.Error = ""
@@ -393,11 +461,14 @@ func executeCanvasAIRequest(ctx context.Context, user model.AuthUser, endpoint s
 	} else if strings.TrimSpace(channelID) != "" {
 		request.Header.Set("X-Model-Channel-ID", channelID)
 	}
-	recorder := httptest.NewRecorder()
+	recorder := &meteorBoundedRecorder{ResponseRecorder: httptest.NewRecorder(), Limit: 40 << 20}
 	proxyAIRequest(recorder, request, endpoint)
 	response := recorder.Result()
 	defer response.Body.Close()
 	payload, _ := io.ReadAll(io.LimitReader(response.Body, 32*1024*1024))
+	if recorder.Overflow {
+		return nil, response.StatusCode, response.Header.Get("Content-Type"), errors.New("生成响应超过40 MiB，请在主站查看原结果，勿重复提交")
+	}
 	return payload, response.StatusCode, response.Header.Get("Content-Type"), nil
 }
 
@@ -405,7 +476,10 @@ func saveFailedCanvasImageTask(task model.CanvasImageTask, message string, detai
 	task.Status = "failed"
 	task.CompletedAt = taskTime()
 	task.Error = firstNonEmpty(message, "图片生成失败")
-	task.ErrorDetail = detail
+	task.ErrorDetail = service.MeteorRedact(detail)
+	if service.MeteorEnabled() && len(task.ErrorDetail) > 16384 {
+		task.ErrorDetail = task.ErrorDetail[:16384]
+	}
 	_, _ = service.SaveCanvasImageTask(task)
 }
 
@@ -413,13 +487,19 @@ func saveFailedCanvasAudioTask(task model.CanvasAudioTask, message string, detai
 	task.Status = "failed"
 	task.CompletedAt = taskTime()
 	task.Error = firstNonEmpty(message, "音频生成失败")
-	task.ErrorDetail = detail
+	task.ErrorDetail = service.MeteorRedact(detail)
+	if service.MeteorEnabled() && len(task.ErrorDetail) > 16384 {
+		task.ErrorDetail = task.ErrorDetail[:16384]
+	}
 	_, _ = service.SaveCanvasAudioTask(task)
 }
 
 func readCanvasTaskAIRequest(r *http.Request, fallbackEndpoint string) ([]byte, string, string, string, string, string, string, string, string, error) {
 	contentType := r.Header.Get("Content-Type")
-	raw, err := io.ReadAll(r.Body)
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (32<<20)+1))
+	if service.MeteorEnabled() && len(raw) > 32<<20 {
+		return nil, "", "", "", "", "", "", "", "", errors.New("请求不能超过32 MiB")
+	}
 	if err != nil {
 		return nil, "", "", "", "", "", "", "", "", err
 	}
@@ -792,4 +872,18 @@ func readCanvasTaskSources(r *http.Request) []string {
 		}
 	}
 	return result
+}
+
+type meteorBoundedRecorder struct {
+	*httptest.ResponseRecorder
+	Limit    int
+	Overflow bool
+}
+
+func (r *meteorBoundedRecorder) Write(data []byte) (int, error) {
+	if r.Body.Len()+len(data) > r.Limit {
+		r.Overflow = true
+		return 0, errors.New("生成响应过大")
+	}
+	return r.ResponseRecorder.Write(data)
 }

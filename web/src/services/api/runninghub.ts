@@ -13,6 +13,6 @@ export type RunningHubInspectInput = {
 
 export function inspectRunningHub(token: string, input: RunningHubInspectInput, admin?: { index?: number; channel: AdminModelChannel }) {
     return admin
-        ? apiPost<WorkflowEntry>("/api/admin/workflow-providers/runninghub/inspect", { ...admin, input }, token)
-        : apiPost<WorkflowEntry>("/api/v1/workflow-providers/runninghub/inspect", input, token);
+        ? apiPost<WorkflowEntry>("/studio/api/admin/workflow-providers/runninghub/inspect", { ...admin, input }, token)
+        : apiPost<WorkflowEntry>("/studio/api/v1/workflow-providers/runninghub/inspect", input, token);
 }

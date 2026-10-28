@@ -18,16 +18,16 @@ export type StorageObjectInfo = {
 };
 
 export function getStorageObjectInfo(id: string) {
-    return apiGet<StorageObjectInfo>(`/api/files/${encodeURIComponent(id)}`);
+    return apiGet<StorageObjectInfo>(`/studio/api/files/${encodeURIComponent(id)}`);
 }
 
 export function registerDirectStorageObject(
     token: string,
     payload: { provider: UserWebDAVStorageProvider; objectKey: string; mimeType: string; bytes: number },
 ) {
-    return apiPost<RegisteredStorageObject>("/api/v1/files/direct", payload, token);
+    return apiPost<RegisteredStorageObject>("/studio/api/v1/files/direct", payload, token);
 }
 
 export function deleteDirectStorageObjectRecord(token: string, id: string) {
-    return apiDelete<boolean>(`/api/v1/files/${encodeURIComponent(id)}/record`, token);
+    return apiDelete<boolean>(`/studio/api/v1/files/${encodeURIComponent(id)}/record`, token);
 }

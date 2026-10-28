@@ -36,6 +36,9 @@ func StartCanvasProjectCleanupScheduler() {
 }
 
 func cleanupExpiredCanvasProjects() {
+	if MeteorEnabled() {
+		return
+	} // Retain deletion tombstones to block stale clients from resurrecting IDs.
 	if err := repository.CleanupDeletedCanvasProjects(
 		time.Now().UTC().
 			Add(-7 * 24 * time.Hour).

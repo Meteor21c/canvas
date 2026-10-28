@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
+import { nanoid } from "nanoid";
 import { readZip } from "@/lib/zip";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
@@ -37,20 +38,29 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(item.project));
+            if (!Array.isArray(data.projects) || data.projects.length > 20) throw new Error("每次最多导入 20 个画布");
+            const keyMapping = new Map<string, string>();
+            for (const project of data.projects) {
+                for (const item of project.files || []) {
+                    if (keyMapping.has(item.storageKey)) continue;
+                    const blob = zip.get(item.path);
+                    if (!blob) continue;
+                    const key = `${item.storageKey.startsWith("image:") ? "image" : "file"}:${nanoid()}`;
+                    const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
+                    await (key.startsWith("image:") ? setImageBlob(key, typedBlob) : setMediaBlob(key, typedBlob));
+                    keyMapping.set(item.storageKey, key);
+                }
+            }
+            const replaceKeys = (value: unknown): unknown => {
+                if (typeof value === "string") return keyMapping.get(value) || value;
+                if (Array.isArray(value)) return value.map(replaceKeys);
+                if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceKeys(item)]));
+                return value;
+            };
+            data.projects.forEach((item) => importProject(replaceKeys(item.project) as typeof item.project));
             message.success(`已导入 ${data.projects.length} 个画布`);
-        } catch {
-            message.error("导入失败，请选择有效的画布压缩包");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "导入失败，请选择有效的画布压缩包");
         } finally {
             if (inputRef.current) inputRef.current.value = "";
         }
@@ -61,7 +71,7 @@ export default function CanvasPage() {
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
                     <div>
-                        <p className="text-xs text-stone-500">画布库</p>
+                        <p className="text-xs text-stone-500">画布库 · 图片和视频缓存保留 24 小时</p>
                         <h1 className="mt-3 text-3xl font-semibold">无限画布</h1>
                     </div>
                     <div className="flex items-center gap-2">

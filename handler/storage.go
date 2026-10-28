@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,13 +58,16 @@ func MeasureUserStorageProvider(w http.ResponseWriter, r *http.Request) {
 
 // UploadFile 上传文件到对象存储。
 func UploadFile(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		r.Body = http.MaxBytesReader(w, r.Body, service.MeteorMaxFileBytes+(1<<20))
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		Fail(w, "请选择要上传的文件")
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, service.MeteorMaxFileBytes+1))
 	if err != nil {
 		FailError(w, err)
 		return
@@ -130,6 +134,10 @@ func DeleteDirectFileRecord(w http.ResponseWriter, r *http.Request, id string) {
 
 // FileContent 获取文件内容。
 func FileContent(w http.ResponseWriter, r *http.Request, id string) {
+	if service.MeteorEnabled() && !service.MeteorOwnsObject(r.Context(), id) && !service.MeteorAuthorizeMedia(r) {
+		FailWithStatus(w, http.StatusForbidden, "素材不存在")
+		return
+	}
 	download, err := service.DownloadStorageObject(id, r.Header.Get("Range"))
 	if err != nil {
 		FailError(w, err)
@@ -138,6 +146,10 @@ func FileContent(w http.ResponseWriter, r *http.Request, id string) {
 	defer download.Stream.Close()
 	w.Header().Set("Content-Type", download.Object.MimeType)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if service.MeteorEnabled() {
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	if download.AcceptRanges {
 		w.Header().Set("Accept-Ranges", "bytes")
 	}
@@ -155,6 +167,10 @@ func FileContent(w http.ResponseWriter, r *http.Request, id string) {
 
 // FileInfo 获取文件元数据。
 func FileInfo(w http.ResponseWriter, r *http.Request, id string) {
+	if service.MeteorEnabled() && !service.MeteorOwnsObject(r.Context(), id) {
+		FailWithStatus(w, http.StatusForbidden, "素材不存在")
+		return
+	}
 	object, err := service.StorageObjectInfo(id)
 	if err != nil {
 		FailError(w, err)
@@ -181,8 +197,20 @@ func AdminMeasureStorageProvider(w http.ResponseWriter, r *http.Request) {
 	OK(w, result)
 }
 
+// Bound this optional remote-image adapter independently from model execution.
+var meteorImageProxySlots = make(chan struct{}, 2)
+
 // ProxyImage 代理图片请求（解决跨域和机器人检测问题）。
 func ProxyImage(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		select {
+		case meteorImageProxySlots <- struct{}{}:
+			defer func() { <-meteorImageProxySlots }()
+		default:
+			FailWithStatus(w, http.StatusTooManyRequests, "图片读取繁忙，请稍后再试")
+			return
+		}
+	}
 	targetURL := r.URL.Query().Get("url")
 	if targetURL == "" {
 		Fail(w, "url 参数不能为空")
@@ -192,44 +220,70 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "无效的 url")
 		return
 	}
-	client := service.SafeProxyHTTPClient()
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	// The safe client resolves and pins public IPs at dial time and applies the
+	// same checks to every redirect. No caller credentials are forwarded.
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
-		FailError(w, err)
+		Fail(w, "无效的图片地址")
 		return
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("Pragma", "no-cache")
-
-	resp, err := client.Do(req)
+	req.Header.Set("User-Agent", "MeteorCanvas/0.8.2")
+	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/gif")
+	resp, err := service.SafeProxyHTTPClient().Do(req)
 	if err != nil {
 		FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败: "+resp.Status)
+		FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
 		return
 	}
-	contentType := resp.Header.Get("Content-Type")
+	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	contentType = strings.ToLower(contentType)
 	isImage := strings.HasPrefix(contentType, "image/")
-	var data []byte
-	if isImage {
-		data, err = io.ReadAll(resp.Body)
-		if err != nil {
-			FailWithStatus(w, http.StatusBadGateway, "代理图片请求失败")
+	if service.MeteorEnabled() {
+		switch contentType {
+		case "image/png", "image/jpeg", "image/webp", "image/gif", "image/avif":
+		default:
+			FailWithStatus(w, http.StatusBadGateway, "仅允许安全的图片响应")
 			return
 		}
 	}
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
+	var data []byte
+	if isImage {
+		const limit = 32 << 20
+		if resp.ContentLength > limit {
+			FailWithStatus(w, http.StatusBadGateway, "图片过大")
+			return
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, limit+1))
+		if err != nil || len(data) == 0 || len(data) > limit {
+			FailWithStatus(w, http.StatusBadGateway, "图片为空、过大或读取失败")
+			return
+		}
+		if service.MeteorEnabled() {
+			sniffed := http.DetectContentType(data)
+			// Some AVIF decoders report octet-stream; its ISO BMFF signature
+			// must still be present. Executable/XML/HTML responses are refused.
+			avif := contentType == "image/avif" && len(data) >= 12 && string(data[4:8]) == "ftyp" && (string(data[8:12]) == "avif" || string(data[8:12]) == "avis")
+			if !strings.HasPrefix(sniffed, "image/") && !avif || strings.Contains(sniffed, "svg") {
+				FailWithStatus(w, http.StatusBadGateway, "图片内容与格式不符")
+				return
+			}
+		}
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if service.MeteorEnabled() {
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	w.WriteHeader(resp.StatusCode)
 	if isImage {
 		_, _ = w.Write(data)

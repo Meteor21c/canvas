@@ -104,13 +104,13 @@ export type AiConfig = {
     audioChannelId: string;
 };
 
-export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
+export const CONFIG_STORE_KEY = "meteor-canvas:v082:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 export type ModelCapabilities = Partial<Record<string, ModelCapability>>;
 
 export const defaultConfig: AiConfig = {
-    channelMode: "local",
-    baseUrl: "https://api.openai.com",
+    channelMode: "remote",
+    baseUrl: "",
     apiKey: "",
     model: "gpt-image-2",
     imageModel: "gpt-image-2",
@@ -193,17 +193,20 @@ type ConfigStore = {
     clearPromptContinue: () => void;
 };
 
-function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseRemoteChannel: boolean) {
-    const channelMode = canUseRemoteChannel ? (modelChannel?.allowCustomChannel ? config.channelMode : "remote") : "local";
-    if (channelMode === "local" || !modelChannel) {
+function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null, canUseRemoteChannel: boolean): AiConfig {
+    const channelMode = "remote" as const;
+    void canUseRemoteChannel;
+    if (!modelChannel) {
         const localChannels = normalizeLocalChannels(config);
         const modelChannels = localChannels.filter((channel) => !isWorkflowProtocol(channel.protocol));
         return {
             ...config,
             channelMode,
-            localChannels,
-            models: normalizeModelList(modelChannels.flatMap((channel) => channel.models)),
-            publicChannels: modelChannel?.channels || [],
+            localChannels: [],
+            baseUrl: "",
+            apiKey: "",
+            models: [],
+            publicChannels: [],
         };
     }
     const models = modelChannel.availableModels;
@@ -394,18 +397,20 @@ export const useConfigStore = create<ConfigStore>()(
             isPublicSettingsLoading: false,
             isConfigOpen: false,
             shouldPromptContinue: false,
-            updateConfig: (key, value) =>
+            updateConfig: (key, value) => {
+                if (["baseUrl", "apiKey", "localChannels", "channelMode", "syncStorageConfig", "syncWebDAVStorageConfig"].includes(key)) return;
                 set((state) => ({
                     config: {
                         ...state.config,
                         [key]: value,
                     },
-                })),
+                }));
+            },
             loadPublicSettings: async () => {
                 if (get().isPublicSettingsLoading) return;
                 set({ isPublicSettingsLoading: true });
                 try {
-                    set({ publicSettings: await apiGet<AdminPublicSettings>("/api/settings") });
+                    set({ publicSettings: await apiGet<AdminPublicSettings>("/studio/api/settings") });
                 } finally {
                     set({ isPublicSettingsLoading: false });
                 }
@@ -429,18 +434,19 @@ export const useConfigStore = create<ConfigStore>()(
                     ...current,
                     config: {
                         ...config,
-                        localChannels,
+                        localChannels: [],
                         models: localModels,
-                        baseUrl: modelChannels[0]?.baseUrl || config.baseUrl,
-                        apiKey: modelChannels[0]?.apiKey || config.apiKey,
+                        baseUrl: "",
+                        apiKey: "",
                         imageChannelId: config.imageChannelId || modelChannels[0]?.id || "",
                         videoChannelId: config.videoChannelId || modelChannels[0]?.id || "",
                         textChannelId: config.textChannelId || modelChannels[0]?.id || "",
                         audioChannelId: config.audioChannelId || modelChannels[0]?.id || "",
                         activeChannelId: config.activeChannelId || "",
-                        syncStorageConfig: config.syncStorageConfig === true,
-                        syncWebDAVStorageConfig: config.syncWebDAVStorageConfig === true,
-                        channelMode: config.channelMode || "remote",
+                        syncStorageConfig: false,
+                        syncWebDAVStorageConfig: false,
+                        channelMode: "remote",
+                        publicChannels: [],
                         imageModel: config.imageModel || config.model,
                         videoModel: config.videoModel || "grok-imagine-video",
                         textModel: config.textModel || config.model,

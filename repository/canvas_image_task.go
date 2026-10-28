@@ -53,7 +53,7 @@ func ListUserCanvasImageTasks(userID string, sources []string, limit int) ([]mod
 		query = query.Where("source IN ?", sources)
 	}
 	err = query.
-		Where("status IN ?", []string{"queued", "processing", "running", "in_progress"}).
+		Where("status IN ?", []string{"queued", "processing", "running", "in_progress", "submission_unknown", "completed", "failed"}).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&tasks).Error

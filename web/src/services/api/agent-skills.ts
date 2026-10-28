@@ -29,21 +29,21 @@ export type AgentSkill = {
 };
 
 export function fetchSystemAgentSkills() {
-    return apiGet<AgentSkill[]>("/api/agent-skills");
+    return apiGet<AgentSkill[]>("/studio/api/agent-skills");
 }
 
 export function fetchSystemAgentSkillFile(id: string, path: string) {
-    return apiGet<AgentSkillFile>(`/api/agent-skills/${encodeURIComponent(id)}/file`, { path });
+    return apiGet<AgentSkillFile>(`/studio/api/agent-skills/${encodeURIComponent(id)}/file`, { path });
 }
 
 export function fetchUserAgentSkills(token: string) {
-    return apiGet<AgentSkill[]>("/api/v1/agent-skills", undefined, token);
+    return apiGet<AgentSkill[]>("/studio/api/v1/agent-skills", undefined, token);
 }
 
 export function saveUserAgentSkill(token: string, skill: Partial<AgentSkill>) {
-    return apiPost<AgentSkill>("/api/v1/agent-skills", skill, token);
+    return apiPost<AgentSkill>("/studio/api/v1/agent-skills", skill, token);
 }
 
 export function deleteUserAgentSkill(token: string, id: string) {
-    return apiDelete<boolean>(`/api/v1/agent-skills/${encodeURIComponent(id)}`, token);
+    return apiDelete<boolean>(`/studio/api/v1/agent-skills/${encodeURIComponent(id)}`, token);
 }

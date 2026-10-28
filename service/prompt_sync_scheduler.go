@@ -4,17 +4,20 @@ import (
 	"log"
 	"sync"
 
+	"github.com/robfig/cron/v3"
+	"github.com/tigerowo/infinite-canvas/config"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/repository"
-	"github.com/robfig/cron/v3"
 )
 
 const defaultPromptSyncCron = "0 0 * * *"
 
 var (
-	promptSyncCron *cron.Cron
-	promptSyncOnce sync.Once
-	promptSyncMu   sync.Mutex
+	promptSyncCron      *cron.Cron
+	promptSyncOnce      sync.Once
+	promptSyncMu        sync.Mutex
+	promptBootstrapOnce sync.Once
+	promptSyncRunMu     sync.Mutex
 )
 
 func StartPromptSyncScheduler() {
@@ -23,6 +26,27 @@ func StartPromptSyncScheduler() {
 		promptSyncCron.Start()
 	})
 	RefreshPromptSyncScheduler()
+	if config.Cfg.MeteorMode {
+		promptBootstrapOnce.Do(func() { go bootstrapMeteorPrompts() })
+	}
+}
+
+// Bootstrap a useful prompt library without waiting until the next midnight.
+// Sources are fixed in code, fetched sequentially, and never invoke a model.
+func bootstrapMeteorPrompts() {
+	_, count, err := repository.ListPrompts(model.Query{})
+	if err != nil || count > 0 {
+		return
+	}
+	promptSyncRunMu.Lock()
+	defer promptSyncRunMu.Unlock()
+	for _, category := range []string{"awesome-gpt-image", "awesome-gpt4o-image-prompts"} {
+		if _, err := SyncPromptCategory(category); err == nil {
+			log.Printf("meteor prompt library ready category=%s", category)
+			return
+		}
+	}
+	log.Print("meteor prompt bootstrap unavailable; daily sync will retry")
 }
 
 func RefreshPromptSyncScheduler() {
@@ -49,6 +73,8 @@ func RefreshPromptSyncScheduler() {
 }
 
 func SyncRemotePromptCategories() {
+	promptSyncRunMu.Lock()
+	defer promptSyncRunMu.Unlock()
 	for _, category := range repository.PromptCategories() {
 		if !category.Remote {
 			continue

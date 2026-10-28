@@ -15,12 +15,24 @@ export default function nextConfig(phase: string): NextConfig {
 
     return {
         output: "standalone",
+        basePath: "/studio",
+        trailingSlash: false,
+        poweredByHeader: false,
+        images: { unoptimized: true },
         allowedDevOrigins: isDev ? ["*.*.*.*"] : [],
         typescript: {
-            ignoreBuildErrors: true,
+            ignoreBuildErrors: false,
+        },
+        async headers() {
+            return [{ source: "/:path*", headers: [
+                { key: "X-Content-Type-Options", value: "nosniff" },
+                { key: "Referrer-Policy", value: "same-origin" },
+                { key: "Content-Security-Policy", value: "object-src 'none'; base-uri 'self'; frame-ancestors 'self'" },
+            ] }];
         },
         env: {
-            NEXT_PUBLIC_APP_VERSION: localVersion,
+            NEXT_PUBLIC_APP_VERSION: `${localVersion}-meteor`,
+            NEXT_PUBLIC_METEOR_SOURCE_REVISION: process.env.SOURCE_REVISION || "meteor/v0.8.2-integration-20261028",
             NEXT_PUBLIC_APP_RELEASES: JSON.stringify(releases),
         },
     };

@@ -152,7 +152,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 >
                     <span className="relative inline-flex">
                         <span className={`flex items-center gap-1.5${showStop ? " invisible" : ""}`}>
-                            <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums"><CreditSymbol />{credits.toLocaleString()}</span>
+                            <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums"><span title="费用与流星 API 主站一致，以实际结算为准">按主站计费</span></span>
                             {generating ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                         </span>
                         {showStop ? <span className="absolute inset-0 flex items-center justify-center">

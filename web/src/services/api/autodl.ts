@@ -16,9 +16,9 @@ export type AutoDLWorkflow = {
 };
 
 export function fetchAutoDLWorkflows(baseUrl: string) {
-    return apiPost<AutoDLWorkflow[]>("/api/ai/autodl/workflows", { baseUrl });
+    return apiPost<AutoDLWorkflow[]>("/studio/api/ai/autodl/workflows", { baseUrl });
 }
 
 export function fetchAutoDLWorkflow(baseUrl: string, workflowId: string) {
-    return apiPost<AutoDLWorkflow>("/api/ai/autodl/workflows", { baseUrl, workflowId });
+    return apiPost<AutoDLWorkflow>("/studio/api/ai/autodl/workflows", { baseUrl, workflowId });
 }

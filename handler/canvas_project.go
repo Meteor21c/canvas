@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/tigerowo/infinite-canvas/service"
@@ -10,7 +11,11 @@ import (
 func UserCanvasProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := service.CurrentUserCanvasProjects(r.Context())
 	if err != nil {
-		FailError(w, err)
+		if errors.Is(err, service.ErrMeteorProjectConflict) {
+			FailWithStatus(w, http.StatusConflict, err.Error())
+		} else {
+			FailError(w, err)
+		}
 		return
 	}
 	OK(w, projects)
@@ -31,7 +36,11 @@ func SaveUserCanvasProject(w http.ResponseWriter, r *http.Request) {
 		request.Data,
 	)
 	if err != nil {
-		FailError(w, err)
+		if errors.Is(err, service.ErrMeteorProjectConflict) {
+			FailWithStatus(w, http.StatusConflict, err.Error())
+		} else {
+			FailError(w, err)
+		}
 		return
 	}
 	OK(w, project)
@@ -51,7 +60,11 @@ func SyncUserCanvasProjects(w http.ResponseWriter, r *http.Request) {
 		request.Projects,
 	)
 	if err != nil {
-		FailError(w, err)
+		if errors.Is(err, service.ErrMeteorProjectConflict) {
+			FailWithStatus(w, http.StatusConflict, err.Error())
+		} else {
+			FailError(w, err)
+		}
 		return
 	}
 	OK(w, projects)

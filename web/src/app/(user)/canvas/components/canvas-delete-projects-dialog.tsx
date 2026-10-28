@@ -1,10 +1,11 @@
 "use client";
 
-import { Button, Modal } from "antd";
+import { useState } from "react";
+import { App, Button, Modal } from "antd";
 
 import { deleteCanvasProjects } from "@/services/api/canvas-tasks";
 import { useAssetStore } from "@/stores/use-asset-store";
-import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasStore, waitForCanvasWrites, finishCanvasDeletion } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 
 export function CanvasDeleteProjectsDialog() {
@@ -13,12 +14,24 @@ export function CanvasDeleteProjectsDialog() {
     const removeSelectedIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
-    const confirm = () => {
-        void deleteCanvasProjects(ids).catch(() => undefined);
-        deleteProjects(ids);
-        cleanupImages();
-        removeSelectedIds(ids);
-        setDeleteIds([]);
+    const { message } = App.useApp();
+    const [deleting, setDeleting] = useState(false);
+    const confirm = async () => {
+        if (deleting) return;
+        const targets = [...ids];
+        let succeeded = false;
+        setDeleting(true);
+        try {
+            await waitForCanvasWrites(targets);
+            await deleteCanvasProjects(targets);
+            deleteProjects(targets);
+            cleanupImages();
+            removeSelectedIds(targets);
+            setDeleteIds([]);
+            succeeded = true;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除失败，画布已保留");
+        } finally { finishCanvasDeletion(targets, succeeded); setDeleting(false); }
     };
 
     return (
@@ -26,11 +39,11 @@ export function CanvasDeleteProjectsDialog() {
             title="删除画布？"
             open={ids.length > 0}
             centered
-            onCancel={() => setDeleteIds([])}
+            onCancel={() => !deleting && setDeleteIds([])}
             footer={
                 <>
                     <Button onClick={() => setDeleteIds([])}>取消</Button>
-                    <Button danger type="primary" onClick={confirm}>
+                    <Button danger type="primary" loading={deleting} onClick={() => void confirm()}>
                         删除
                     </Button>
                 </>

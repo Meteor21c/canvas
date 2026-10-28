@@ -5,11 +5,14 @@ import { persist } from "zustand/middleware";
 
 import { AUTH_TOKEN_KEY, fetchCurrentUser, login, register, type AuthPayload, type AuthUser } from "@/services/api/auth";
 
+import { readMainAuthToken } from "@/services/api/request";
+
 type UserStore = {
     token: string;
     user: AuthUser | null;
     isReady: boolean;
     isLoading: boolean;
+    error: string;
     setSession: (token: string, user: AuthUser) => void;
     clearSession: () => void;
     hydrateUser: () => Promise<void>;
@@ -24,24 +27,30 @@ export const useUserStore = create<UserStore>()(
             user: null,
             isReady: false,
             isLoading: false,
+            error: "",
             setSession: (token, user) => set({ token, user, isReady: true }),
-            clearSession: () => set({ token: "", user: null, isReady: true }),
+            clearSession: () => {
+                set({ token: "", user: null, isReady: true, error: "" });
+                window.location.assign("/");
+            },
             hydrateUser: async () => {
-                const token = get().token;
+                const token = readMainAuthToken();
                 if (!token) {
-                    set({ user: null, isReady: true });
+                    set({ token: "", user: null, isReady: true, error: "请先登录流星 API 主站" });
                     return;
                 }
-                set({ isLoading: true });
+                set({ isLoading: true, error: "" });
                 try {
                     const user = await fetchCurrentUser(token);
+                    if (readMainAuthToken() !== token) return;
                     if (user.role === "guest") {
                         set({ token: "", user: null, isReady: true, isLoading: false });
                         return;
                     }
-                    set({ user, isReady: true, isLoading: false });
-                } catch {
-                    set({ token: "", user: null, isReady: true, isLoading: false });
+                    set({ token, user, isReady: true, isLoading: false, error: "" });
+                } catch (error) {
+                    if (readMainAuthToken() !== token) return;
+                    set({ token: "", user: null, isReady: true, isLoading: false, error: error instanceof Error ? error.message : "无法验证主站登录状态" });
                 }
             },
             login: async (payload) => {
@@ -69,7 +78,7 @@ export const useUserStore = create<UserStore>()(
         }),
         {
             name: AUTH_TOKEN_KEY,
-            partialize: (state) => ({ token: state.token }),
+            partialize: () => ({}),
             onRehydrateStorage: () => (state) => {
                 if (state) state.isReady = false;
             },

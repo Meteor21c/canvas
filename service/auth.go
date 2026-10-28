@@ -38,6 +38,7 @@ type userExtra struct {
 }
 
 func EnsureDefaultAdmin() error {
+	if MeteorEnabled() { return nil }
 	if strings.TrimSpace(config.Cfg.AdminUsername) == "" || strings.TrimSpace(config.Cfg.AdminPassword) == "" {
 		return nil
 	}
@@ -336,6 +337,7 @@ func AdjustUserCredits(id string, credits float64) (model.User, error) {
 }
 
 func ConsumeUserCredits(userID string, modelName string, credits float64, path string, task ...any) error {
+	if MeteorEnabled() { if len(task)>0 && task[0]!=nil{return repository.InsertWorkflowTask(task[0])};return nil }
 	credits = normalizeCredits(credits)
 	var workflowTask any
 	if len(task) > 0 {
@@ -368,6 +370,7 @@ func ConsumeUserCredits(userID string, modelName string, credits float64, path s
 }
 
 func RefundUserCredits(userID string, modelName string, credits float64, path string) error {
+	if MeteorEnabled() { return nil }
 	credits = normalizeCredits(credits)
 	if credits <= 0 {
 		return nil

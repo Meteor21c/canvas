@@ -21,6 +21,10 @@ import (
 const userModelChannelHeader = "X-User-Model-Channel-ID"
 
 func selectAIRequestChannel(user model.AuthUser, modelName string, channelID string, userChannelID string, publicOnly bool) (model.ModelChannel, string, error) {
+	if service.MeteorEnabled() {
+		channel, err := service.MeteorSelectChannel(user.ID, modelName, channelID)
+		return channel, "", err
+	}
 	userChannelID = strings.TrimSpace(userChannelID)
 	if userChannelID != "" {
 		channel, err := service.SelectUserLocalModelChannelForModel(user.ID, modelName, userChannelID)
@@ -67,6 +71,10 @@ func AIVideo(w http.ResponseWriter, r *http.Request, id string) {
 	if serveAIVideoTask(w, r, id) {
 		return
 	}
+	if service.MeteorEnabled() {
+		OK(w, map[string]any{"id": id, "object": "video", "status": "result_expired", "error": map[string]string{"message": "原结果不可用或已过期；不会重新提交，请查看主站记录。"}})
+		return
+	}
 	if isClientVideoTaskID(id) {
 		OK(w, map[string]any{"id": id, "task_id": id, "object": "video", "status": "queued", "progress": 0})
 		return
@@ -75,6 +83,10 @@ func AIVideo(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func AIVideoContent(w http.ResponseWriter, r *http.Request, id string) {
+	if service.MeteorEnabled() {
+		meteorVideoContent(w, r, id)
+		return
+	}
 	for _, adapter := range builtinAIProtocols {
 		if adapter.videoContent != nil && adapter.videoContent(w, r, id) {
 			return
@@ -124,6 +136,14 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
+	if service.MeteorEnabled() && r.Header.Get("X-Canvas-Node-Request") != "true" {
+		release, available := service.TryMeteorGeneration()
+		if !available {
+			FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+			return
+		}
+		defer release()
+	}
 	startedAt := time.Now()
 	body, contentType, modelName, err := readAIRequest(r)
 	if err != nil {
@@ -247,11 +267,11 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, channel model.
 
 	if response.StatusCode >= http.StatusBadRequest {
 		payload, _ := io.ReadAll(io.LimitReader(response.Body, 256*1024))
-		log.Printf("AI upstream error: url=%s status=%d body=%s", request.URL.String(), response.StatusCode, strings.TrimSpace(string(payload)))
+		log.Printf("AI upstream error: url=%s status=%d body=%s", request.URL.String(), response.StatusCode, service.MeteorRedact(strings.TrimSpace(string(payload))))
 		if onFailure != nil {
 			onFailure()
 		}
-		saveAIProxyLog(logContext, response.StatusCode, string(payload), strings.TrimSpace(string(payload)))
+		saveAIProxyLog(logContext, response.StatusCode, string(payload), service.MeteorRedact(strings.TrimSpace(string(payload))))
 		message := readUpstreamAIErrorMessage(payload, response.StatusCode)
 		if service.IsTokenDanceChannel(channel) {
 			message = firstNonEmpty(service.TokenDanceRecoveryMessage(response.Header.Get("TokenDance-Recovery-Action")), message)

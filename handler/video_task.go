@@ -55,6 +55,10 @@ func DeleteUserVideoTask(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
+	if service.MeteorEnabled() {
+		meteorCreateVideo(w, r)
+		return
+	}
 	startedAt := time.Now()
 	body, contentType, modelName, err := readAIRequest(r)
 	if err != nil {
@@ -310,6 +314,9 @@ func serveGeminiVideoTaskContent(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func pollVideoTaskFromUpstream(ctx context.Context, task model.VideoTask) (service.VideoTaskPollUpdate, error) {
+	if service.MeteorEnabled() {
+		return meteorPollVideo(ctx, task)
+	}
 	var channel model.ModelChannel
 	var err error
 	if strings.TrimSpace(task.UserChannelID) != "" {

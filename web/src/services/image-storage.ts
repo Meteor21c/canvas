@@ -1,11 +1,11 @@
 "use client";
 
-import localforage from "localforage";
+import { createMeteorMediaStore, meteorObjectUrl } from "@/services/meteor-media-retention";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
 import { deleteAnonymousStorageFile, uploadAnonymousStorageFile } from "@/services/anonymous-storage";
-import { apiGet } from "@/services/api/request";
+import { apiGet, studioFetch } from "@/services/api/request";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type UploadedImage = {
@@ -54,11 +54,11 @@ export type StorageConfig = {
     autoSyncAllAssets: boolean;
 };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
+const store = createMeteorMediaStore("image");
 const objectUrls = new Map<string, string>();
 const serverUrls = new Map<string, string>();
-export const USER_STORAGE_PROVIDER_KEY = "infinite-canvas:user_storage_provider";
-export const USER_WEBDAV_STORAGE_PROVIDER_KEY = "infinite-canvas:user_webdav_storage_provider";
+export const USER_STORAGE_PROVIDER_KEY = "meteor-canvas:v082:user_storage_provider";
+export const USER_WEBDAV_STORAGE_PROVIDER_KEY = "meteor-canvas:v082:user_webdav_storage_provider";
 let storageConfigPromise: Promise<StorageConfig> | null = null;
 export const STORAGE_SYNC_FAILED_EVENT = "infinite-canvas:storage-sync-failed";
 const autoSyncRequests = new Map<string | Blob, Promise<{ storageKey: string } | null>>();
@@ -157,7 +157,6 @@ export function getProxyUrl(url: string): string {
     try {
         const parsed = new URL(url);
         if (
-            isLocalNetworkHost(parsed.hostname) ||
             (typeof window !== "undefined" &&
                 parsed.host === window.location.host)
         ) {
@@ -166,14 +165,14 @@ export function getProxyUrl(url: string): string {
     } catch {
         return url;
     }
-    return `/api/proxy-image?url=${encodeURIComponent(url)}`;
+    return `/studio/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
 export async function uploadImage(input: string | Blob, options: UploadImageOptions = {}): Promise<UploadedImage> {
     const url = typeof input === "string" ? getProxyUrl(input) : input;
     let blob: Blob;
     if (typeof url === "string") {
-        const response = await fetch(url);
+        const response = await studioFetch(url);
         if (!response.ok) {
             const payload = await response.json().catch(() => null) as { msg?: string } | null;
             throw new Error(payload?.msg || `代理图片拉取失败：${response.status}`);
@@ -193,14 +192,14 @@ export async function uploadImage(input: string | Blob, options: UploadImageOpti
     }
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
-    const urlObj = URL.createObjectURL(blob);
+    const urlObj = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, urlObj);
     const meta = await readImageMeta(urlObj);
     return { url: urlObj, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
 
 export async function uploadRemoteImageToServer(url: string, filename: string): Promise<UploadedImage> {
-    const response = await fetch(getProxyUrl(url));
+    const response = await studioFetch(getProxyUrl(url));
     if (!response.ok) {
         const payload = await response.json().catch(() => null) as { msg?: string } | null;
         throw new Error(payload?.msg || "代理图片拉取失败：" + response.status);
@@ -222,7 +221,7 @@ export async function uploadRemoteImageToServer(url: string, filename: string): 
     const formData = new FormData();
     formData.append("file", blob, filename || "image-" + nanoid() + "." + imageExtension(blob.type));
     if (userProvider) formData.append("provider", JSON.stringify(toProviderPayload(userProvider)));
-    const uploadResponse = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: "Bearer " + token }, body: formData });
+    const uploadResponse = await studioFetch("/studio/api/v1/files", { method: "POST", headers: { Authorization: "Bearer " + token }, body: formData });
     const payload = (await uploadResponse.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedImage } | null;
     if (!uploadResponse.ok || payload?.code !== 0 || !payload.data) throw new Error(payload?.msg || "服务端图片上传失败");
     const meta = await readImageMeta(payload.data.url);
@@ -265,19 +264,17 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
                 if (!useUserStore.getState().token || !direct.isWebDAVDirectUnavailable(error)) throw error;
             }
         }
-        const url = info.publicUrl || `/api/files/${encodeURIComponent(id)}/content`;
+        const url = info.publicUrl || `/studio/api/files/${encodeURIComponent(id)}/content`;
         serverUrls.set(id, url);
         return url;
     }
-    return await resolveLocalImageUrl(storageKey) || fallback;
+    return await resolveLocalImageUrl(storageKey) || (fallback.startsWith("blob:") ? "" : fallback);
 }
 
 async function resolveLocalImageUrl(storageKey: string) {
-    const cached = objectUrls.get(storageKey);
-    if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
     if (!blob) return "";
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, url);
     return url;
 }
@@ -311,7 +308,7 @@ async function maybeUploadImageToServer(blob: Blob, tokenOverride?: string): Pro
     const formData = new FormData();
     formData.append("file", blob, `image-${nanoid()}.${imageExtension(blob.type)}`);
     if (userProvider) formData.append("provider", JSON.stringify(toProviderPayload(userProvider)));
-    const response = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
+    const response = await studioFetch("/studio/api/v1/files", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
     const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedImage } | null;
     if (!response.ok || payload?.code !== 0 || !payload.data) {
         if (!canUseGlobalProvider) return null;
@@ -329,8 +326,9 @@ async function uploadWebDAVImageDirect(blob: Blob, filename: string, provider: U
 }
 
 async function cacheAnonymousImage(uploaded: UploadedImage, blob: Blob) {
+    const storageKey = uploaded.storageKey;
     await store.setItem(uploaded.storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(uploaded.storageKey, url);
     if (uploaded.storageKey.startsWith("server:") && uploaded.url && !uploaded.url.includes("direct=1")) serverUrls.set(uploaded.storageKey.slice("server:".length), uploaded.url);
     const meta = await readImageMeta(url);
@@ -338,7 +336,7 @@ async function cacheAnonymousImage(uploaded: UploadedImage, blob: Blob) {
 }
 
 export async function loadStorageConfig() {
-    storageConfigPromise ||= apiGet<StorageConfig>("/api/storage/config");
+    storageConfigPromise ||= apiGet<StorageConfig>("/studio/api/storage/config");
     return storageConfigPromise;
 }
 
@@ -349,12 +347,17 @@ function imageExtension(mimeType: string) {
 }
 
 export async function getImageBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
+    const local = await store.getItem<Blob>(storageKey);
+    if (local || !storageKey.startsWith("server:")) return local;
+    const url = await resolveImageUrl(storageKey);
+    if (!url) return null;
+    const response = await studioFetch(url);
+    return response.ok ? response.blob() : null;
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {
     await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, url);
     return url;
 }
@@ -374,15 +377,15 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
         image.url && !image.url.startsWith("blob:") ? image.url : "",
         localUrl,
         resolvedUrl,
-        serverObjectId && !directGuestObject ? `/api/files/${encodeURIComponent(serverObjectId)}/content` : "",
+        serverObjectId && !directGuestObject ? `/studio/api/files/${encodeURIComponent(serverObjectId)}/content` : "",
     ].filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index);
-    if (!urls.length) return "";
+    if (!urls.length) throw new Error("参考图缓存已过期（保留 24 小时），请重新上传");
     let lastError = "";
     for (const url of urls) {
         if (url.startsWith("data:")) return url;
         try {
             const proxyUrl = getProxyUrl(url);
-            const response = await fetch(proxyUrl);
+            const response = await studioFetch(proxyUrl);
             if (!response.ok) {
                 lastError = `读取参考图失败：${response.status}`;
                 continue;
@@ -574,7 +577,7 @@ async function deleteServerImage(storageKey: string) {
         await store.removeItem(storageKey);
         return;
     }
-    const response = await fetch(`/api/v1/files/${encodeURIComponent(id)}`, {
+    const response = await studioFetch(`/studio/api/v1/files/${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(provider ? { provider: toProviderPayload(provider) } : {}),

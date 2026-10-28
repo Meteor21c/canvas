@@ -127,7 +127,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, videoFram
             >
                 <span className="inline-flex items-center gap-1.5">
                     <span className="inline-flex items-center gap-1">
-                        {node.metadata?.workflowRef ? "工作流" : <><CreditSymbol />{credits.toLocaleString()}</>}
+                        {node.metadata?.workflowRef ? "工作流" : <><span title="费用与流星 API 主站一致，以实际结算为准">按主站计费</span></>}
                     </span>
                     {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
                     <span>开始生成</span>

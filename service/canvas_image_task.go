@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -31,6 +32,21 @@ type CanvasImageTaskCreateInput struct {
 }
 
 func CreateCanvasImageTask(input CanvasImageTaskCreateInput) (model.CanvasImageTask, error) {
+	unlock := LockMeteorCreation()
+	defer unlock()
+	if MeteorEnabled() && input.ClientTaskID != "" {
+		db, err := repository.DB()
+		if err != nil {
+			return model.CanvasImageTask{}, err
+		}
+		var existing model.CanvasImageTask
+		if db.First(&existing, "id = ?", input.ClientTaskID).Error == nil {
+			if existing.UserID != input.UserID {
+				return model.CanvasImageTask{}, errors.New("任务编号已被使用")
+			}
+			return existing, ErrMeteorTaskExists
+		}
+	}
 	current := now()
 	task := model.CanvasImageTask{
 		ID:              firstVideoTaskValue(input.ClientTaskID, "canvas_image_task_"+uuid.NewString()),
@@ -54,6 +70,17 @@ func CreateCanvasImageTask(input CanvasImageTaskCreateInput) (model.CanvasImageT
 		RequestBody:     input.RequestBody,
 		CreatedAt:       current,
 		UpdatedAt:       current,
+	}
+	if MeteorEnabled() {
+		claimed, err := ClaimMeteorTask("image", task.ID, task.UserID)
+		if err != nil {
+			return task, err
+		}
+		if !claimed {
+			task.Status = "result_expired"
+			task.ErrorDetail = "原任务结果已清理；不会按此编号重复提交，请在主站记录查看。"
+			return task, ErrMeteorTaskExists
+		}
 	}
 	saved := task
 	var err error
@@ -97,6 +124,23 @@ func BatchUserCanvasImageTasks(userID string, ids []string) ([]map[string]any, e
 }
 
 func DeleteUserCanvasImageTask(userID string, id string) error {
+	if MeteorEnabled() {
+		task, found, err := GetUserCanvasImageTask(userID, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return nil
+		}
+		if task.Status != "completed" && task.Status != "failed" && task.Status != "cancelled" {
+			return errors.New("任务尚未完成，不能移除其恢复记录")
+		}
+		db, err := repository.DB()
+		if err != nil {
+			return err
+		}
+		return db.Model(&model.CanvasImageTask{}).Where("user_id = ? AND id = ?", userID, id).Update("source", "meteor-hidden").Error
+	}
 	return repository.DeleteUserCanvasImageTask(strings.TrimSpace(userID), strings.TrimSpace(id))
 }
 
@@ -106,6 +150,9 @@ func SaveCanvasImageTask(task model.CanvasImageTask) (model.CanvasImageTask, err
 }
 
 func CanvasImageTaskResponse(task model.CanvasImageTask) map[string]any {
+	if MeteorEnabled() && strings.HasPrefix(task.StorageKey, "server:") {
+		task.ImageURL = MeteorMediaURL(strings.TrimPrefix(task.StorageKey, "server:"))
+	}
 	result := map[string]any{
 		"id":             task.ID,
 		"object":         "canvas.image.task",
@@ -128,7 +175,15 @@ func CanvasImageTaskResponse(task model.CanvasImageTask) map[string]any {
 		result["url"] = task.ImageURL
 		result["image_url"] = task.ImageURL
 		if len(task.ImageURLs) > 0 {
-			result["image_urls"] = task.ImageURLs
+			urls := append([]string(nil), task.ImageURLs...)
+			if MeteorEnabled() {
+				for i, value := range urls {
+					if strings.HasPrefix(value, "server:") {
+						urls[i] = MeteorMediaURL(strings.TrimPrefix(value, "server:"))
+					}
+				}
+			}
+			result["image_urls"] = urls
 		}
 		result["storageKey"] = task.StorageKey
 		result["width"] = task.Width

@@ -24,7 +24,7 @@ export type PromptListResponse = {
 
 export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
     return apiGet<PromptListResponse>(
-        "/api/prompts",
+        "/studio/api/prompts",
         compactApiParams({
             ...(keyword ? { keyword } : {}),
             ...(tag.length ? { tag } : {}),

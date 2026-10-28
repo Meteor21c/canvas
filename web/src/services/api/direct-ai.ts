@@ -123,7 +123,7 @@ async function prepareDirectRequest(config: AiConfig, provider: DirectAIProvider
     const channel = requireDirectChannel(config);
     const serialized = await serializeDirectBody(body);
     assertSafeDirectBody(serialized.body);
-    const plan = await apiPost<DirectRequestPlan & TokenDanceDirectRequestPlan>("/api/ai/direct-request", {
+    const plan = await apiPost<DirectRequestPlan & TokenDanceDirectRequestPlan>("/studio/api/ai/direct-request", {
         channel: { protocol: channel.protocol, baseUrl: channel.baseUrl },
         model: config.model || config.videoModel,
         endpoint,

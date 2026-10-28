@@ -31,6 +31,7 @@ description: 当前后端主要数据表与字段说明
 - `image_generation_logs`
 - `canvas_image_tasks`
 - `canvas_audio_tasks`
+- `meteor_task_receipts`
 - `comfy_bridges`
 - `comfy_bridge_requests`
 - `canvas_projects`
@@ -38,6 +39,28 @@ description: 当前后端主要数据表与字段说明
 - `storage_objects`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
+
+### 流星 API 集成模式的独立数据库
+
+`METEOR_MODE=true` 使用创作台自己的 SQLite 数据库，部署路径为 `/app/data/infinite-canvas.db`，不连接或迁移主站 Sub2API 的数据库。项目、任务恢复记录、提示词和临时媒体索引保存在此库。主站用户映射为 `meteor_user_<主站用户ID>` 的本地影子身份；主站仍是账号权限、余额和计费的唯一来源，本地 `users.credits` 与 `credit_logs` 不承担第二套钱包。
+
+主站 JWT 和 API Key 仅保存在 Go 进程内存，不写入这些表。重启后需要再次通过主站身份验证，已有任务按原编号恢复查询；提交结果不明确时不自动重发，也不据此声明退款。本文其余章节中的原版自定义渠道、存储凭证和本地算力点说明适用于非 Meteor 模式。
+
+### meteor_task_receipts
+
+流星模式的最小持久幂等回执表，由 `MeteorTaskReceipt` 模型自动迁移。实际字段如下，不含任务正文、结果、状态、上游地址、密钥或扣费金额。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 客户端或本地任务 ID，与 `kind` 组成联合主键 |
+| `kind` | string | 任务种类：`image`、`audio`、`video`；与 `id` 组成联合主键 |
+| `user_id` | string | 本地影子用户 ID，普通索引 |
+| `created_at` | string | 首次占用任务编号的时间 |
+
+创建任务时先用 `INSERT ON CONFLICT DO NOTHING` 占用回执。相同用户重复使用同种类与任务编号时返回已有任务；对应结果缓存已清理时返回 `result_expired`，不会再发起付费生成。其他用户不能复用该联合主键覆盖原任务。
+
+回执不会随 24 小时任务结果缓存清理、临时媒体清理或成果卡片移除而删除，当前没有自动过期调度。因此，即使较大的任务正文和结果行已经释放，同一历史客户端编号仍不能产生第二次提交。回执只表明编号已被使用，不证明上游受理、生成成功、实际消费或退款。
+
 
 ### users
 
@@ -365,6 +388,11 @@ Bridge 持久化请求队列表。普通执行请求由服务端按设备分配�
 | `deleted_at` | string | 软删除时间，空字符串表示未删除；超过 7 天由启动时和每天定时任务物理清理 |
 
 索引：`idx_canvas_projects_user_deleted_updated (user_id, deleted_at, updated_at)`、`idx_canvas_projects_deleted_at (deleted_at)`
+
+流星模式仍使用以上字段，不新增独立 `revision` 数据列。版本号保存在 `project_data` JSON 的 `revision` 整数字段中：普通首次保存要求 `0` 并写入 `1`，后续保存必须匹配当前 JSON 版本，成功后递增；旧版本或已删除项目返回 HTTP 409，不能按客户端时间静默覆盖。
+
+流星模式的 sync 仅插入缺失 ID 并返回账号当前完整项目列表，不替换已有工程或删除墓碑。该模式跳过原版七天墓碑物理清理，长期保留删除标记，阻止旧浏览器缓存恢复已删除项目。每账号最多 20 个未删除工程，单工程最多 1 MiB、合计最多 10 MiB；项目 JSON 与独立媒体文件分开保留，临时素材过期不会删除工程，也不会自动重新生成。
+
 
 
 ### settings

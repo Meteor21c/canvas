@@ -21,7 +21,13 @@ func main() {
 	}
 	service.StartPromptSyncScheduler()
 	service.StartCanvasProjectCleanupScheduler()
+	service.MeteorRecoverInterruptedTasks()
+	service.StartMeteorMaintenance()
 	handler.StartVideoTaskPoller()
 	service.WakeComfyBridgePoller()
-	log.Fatal(router.New().Run(":" + config.Cfg.Port))
+	address := ":" + config.Cfg.Port
+	if config.Cfg.MeteorMode {
+		address = "127.0.0.1:" + config.Cfg.Port
+	}
+	log.Fatal(router.New().Run(address))
 }

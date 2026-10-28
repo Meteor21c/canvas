@@ -1,21 +1,21 @@
 "use client";
 
-import localforage from "localforage";
+import { createMeteorMediaStore, meteorObjectUrl } from "@/services/meteor-media-retention";
 import { nanoid } from "nanoid";
 
 import { deleteAnonymousStorageFile, uploadAnonymousStorageFile } from "@/services/anonymous-storage";
-import { apiGet } from "@/services/api/request";
+import { apiGet, studioFetch } from "@/services/api/request";
 import { autoSyncToCloud, canUseGlobalStorage, clearAutoSyncCache, getProxyUrl, loadUserStorageProvider, toProviderPayload, type StorageConfig, type UserWebDAVStorageProvider } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
+const store = createMeteorMediaStore("media");
 const objectUrls = new Map<string, string>();
 let storageConfigPromise: Promise<StorageConfig> | null = null;
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", syncId?: string, tokenOverride?: string): Promise<UploadedFile> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const blob = typeof input === "string" ? await (await studioFetch(input)).blob() : input;
     const uploaded = await autoSyncToCloud(syncId || blob, async () => {
         const metadataUrl = blob.type.startsWith("video/") ? URL.createObjectURL(blob) : undefined;
         try {
@@ -27,7 +27,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", syn
     if (uploaded) return uploaded;
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, url);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : {};
     return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
@@ -43,7 +43,7 @@ export async function uploadAssetMediaFile(file: File, prefix = "asset-media"): 
 }
 
 export async function downloadRemoteMedia(url: string) {
-    const response = await fetch(getProxyUrl(url));
+    const response = await studioFetch(getProxyUrl(url));
     if (!response.ok) throw new Error(`媒体下载失败：${response.status}`);
     const blob = await response.blob();
     if (blob.type.includes("json") || blob.type.startsWith("text/")) {
@@ -85,7 +85,7 @@ async function uploadMediaBlobToServer(blob: Blob, filename: string, metadataUrl
     const formData = new FormData();
     formData.append("file", blob, filename);
     if (userProvider) formData.append("provider", JSON.stringify(toProviderPayload(userProvider)));
-    const response = await fetch("/api/v1/files", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
+    const response = await studioFetch("/studio/api/v1/files", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
     const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedFile } | null;
     if (!response.ok || payload?.code !== 0 || !payload.data) throw new Error(payload?.msg || "媒体同步失败");
     const meta = metadataUrl || payload.data.mimeType?.startsWith("video/") ? await readVideoMeta(metadataUrl || payload.data.url) : {};
@@ -99,15 +99,16 @@ async function uploadWebDAVMediaDirect(blob: Blob, filename: string, provider: U
 }
 
 async function cacheAnonymousMedia(uploaded: UploadedFile, blob: Blob) {
+    const storageKey = uploaded.storageKey;
     await store.setItem(uploaded.storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(uploaded.storageKey, url);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : {};
     return { ...uploaded, url, bytes: uploaded.bytes || blob.size, mimeType: uploaded.mimeType || blob.type || "application/octet-stream", ...meta };
 }
 
 async function loadStorageConfig() {
-    storageConfigPromise ||= apiGet<StorageConfig>("/api/storage/config");
+    storageConfigPromise ||= apiGet<StorageConfig>("/studio/api/storage/config");
     return storageConfigPromise;
 }
 
@@ -121,11 +122,9 @@ export async function uploadMediaBlob(blob: Blob, filename: string): Promise<Upl
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
-    const cached = objectUrls.get(storageKey);
-    if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey).catch(() => null);
     if (blob) {
-        const url = URL.createObjectURL(blob);
+        const url = meteorObjectUrl(storageKey, blob);
         objectUrls.set(storageKey, url);
         return url;
     }
@@ -137,7 +136,7 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     }
     if (storageKey.startsWith("server:")) {
         const id = storageKey.slice("server:".length);
-        if (fallback && !fallback.startsWith("blob:") && !fallback.includes("direct=1") && !fallback.startsWith("/webdav-media/")) return fallback;
+        if (fallback && !fallback.startsWith("blob:") && !fallback.includes("direct=1") && !fallback.startsWith("/studio/webdav-media/")) return fallback;
         const { getStorageObjectInfo } = await import("@/services/api/storage");
         const info = await getStorageObjectInfo(id).catch(() => null);
         if (!info) return fallback;
@@ -150,19 +149,24 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
                 if (!useUserStore.getState().token || !direct.isWebDAVDirectUnavailable(error)) throw error;
             }
         }
-        const url = info.publicUrl || `/api/files/${encodeURIComponent(id)}/content`;
+        const url = info.publicUrl || `/studio/api/files/${encodeURIComponent(id)}/content`;
         return url;
     }
-    return fallback;
+    return fallback.startsWith("blob:") ? "" : fallback;
 }
 
 export async function getMediaBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
+    const local = await store.getItem<Blob>(storageKey);
+    if (local || !storageKey.startsWith("server:")) return local;
+    const url = await resolveMediaUrl(storageKey);
+    if (!url) return null;
+    const response = await studioFetch(url);
+    return response.ok ? response.blob() : null;
 }
 
 export async function setMediaBlob(storageKey: string, blob: Blob) {
     await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
+    const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, url);
     return url;
 }
@@ -194,7 +198,7 @@ async function deleteServerMedia(storageKey: string) {
         await store.removeItem(storageKey);
         return;
     }
-    const response = await fetch(`/api/v1/files/${encodeURIComponent(id)}`, {
+    const response = await studioFetch(`/studio/api/v1/files/${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(provider ? { provider: toProviderPayload(provider) } : {}),

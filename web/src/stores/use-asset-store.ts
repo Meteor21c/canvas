@@ -41,7 +41,7 @@ type AssetStore = {
     cleanupImages: (extra?: unknown, storageKeys?: ReadonlyMap<string, string>, ownerToken?: string) => void;
 };
 
-const ASSET_STORE_KEY = "infinite-canvas:asset_store";
+const ASSET_STORE_KEY = "meteor-canvas:v082:asset_store";
 let activeAssetSyncToken = "";
 let accountAssetSyncEnabled = false;
 let isHydratingAccountAssets = false;
@@ -64,16 +64,32 @@ async function resolveStoredAsset(asset: Asset): Promise<Asset> {
     return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
 }
 
+async function waitForMainUser() {
+    if (useUserStore.getState().isReady) return;
+    await new Promise<void>(resolve => {
+        const unsubscribe = useUserStore.subscribe(state => { if (state.isReady) { unsubscribe(); resolve(); } });
+    });
+}
+
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
-        const value = await localForageStorage.getItem(name);
+        await waitForMainUser();
+        const account = useUserStore.getState().user?.id;
+        if (!account) return null;
+        const value = await localForageStorage.getItem(`${name}:${account}`);
         if (!value) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(parsed.state.assets.map(resolveStoredAsset));
         return parsed;
     },
-    setItem: (name, value) => localForageStorage.setItem(name, JSON.stringify(value)),
-    removeItem: (name) => localForageStorage.removeItem(name),
+    setItem: async (name, value) => {
+        const account = useUserStore.getState().user?.id;
+        if (account) await localForageStorage.setItem(`${name}:${account}`, JSON.stringify(value));
+    },
+    removeItem: async (name) => {
+        const account = useUserStore.getState().user?.id;
+        if (account) await localForageStorage.removeItem(`${name}:${account}`);
+    },
 };
 
 export const useAssetStore = create<AssetStore>()(

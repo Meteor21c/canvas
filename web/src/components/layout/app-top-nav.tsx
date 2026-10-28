@@ -30,8 +30,8 @@ export function AppTopNav() {
                                 <span
                                     className="size-5 shrink-0 bg-current"
                                     style={{
-                                        mask: "url(/logo.svg) center / contain no-repeat",
-                                        WebkitMask: "url(/logo.svg) center / contain no-repeat",
+                                        mask: "url(/studio/logo.svg) center / contain no-repeat",
+                                        WebkitMask: "url(/studio/logo.svg) center / contain no-repeat",
                                     }}
                                 />
                                 <span className="text-base font-medium">无限画布</span>

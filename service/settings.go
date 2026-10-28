@@ -33,6 +33,7 @@ func PublicSettings() (model.PublicSetting, error) {
 }
 
 func UserCanUseRemoteModelChannel(user model.AuthUser) bool {
+	if MeteorEnabled() { return strings.HasPrefix(user.ID,"meteor_user_") }
 	if user.Role == model.UserRoleAdmin {
 		return true
 	}
@@ -234,6 +235,7 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 }
 
 func ModelCost(modelName string) (float64, error) {
+	if MeteorEnabled() { return 0,nil }
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return 0, err
@@ -336,6 +338,7 @@ func SelectModelChannel(modelName string) (model.ModelChannel, error) {
 }
 
 func SelectModelChannelForModel(modelName string, channelID string, publicOnly bool) (model.ModelChannel, error) {
+	if MeteorEnabled() { return MeteorSelectAnyChannel(modelName,channelID) }
 	settings, err := repository.GetSettings()
 	if err != nil {
 		return model.ModelChannel{}, err
@@ -374,6 +377,7 @@ func SelectModelChannelForModel(modelName string, channelID string, publicOnly b
 }
 
 func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
+	if MeteorEnabled() { return meteorGatewayClient(channel) }
 	timeout := channel.Timeout
 	if timeout <= 0 {
 		timeout = 600

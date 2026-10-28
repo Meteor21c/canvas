@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -29,6 +30,21 @@ type CanvasAudioTaskCreateInput struct {
 }
 
 func CreateCanvasAudioTask(input CanvasAudioTaskCreateInput) (model.CanvasAudioTask, error) {
+	unlock := LockMeteorCreation()
+	defer unlock()
+	if MeteorEnabled() && input.ClientTaskID != "" {
+		db, err := repository.DB()
+		if err != nil {
+			return model.CanvasAudioTask{}, err
+		}
+		var existing model.CanvasAudioTask
+		if db.First(&existing, "id = ?", input.ClientTaskID).Error == nil {
+			if existing.UserID != input.UserID {
+				return model.CanvasAudioTask{}, errors.New("任务编号已被使用")
+			}
+			return existing, ErrMeteorTaskExists
+		}
+	}
 	current := now()
 	task := model.CanvasAudioTask{
 		ID:              firstVideoTaskValue(input.ClientTaskID, "canvas_audio_task_"+uuid.NewString()),
@@ -51,6 +67,17 @@ func CreateCanvasAudioTask(input CanvasAudioTaskCreateInput) (model.CanvasAudioT
 		RequestBody:     input.RequestBody,
 		CreatedAt:       current,
 		UpdatedAt:       current,
+	}
+	if MeteorEnabled() {
+		claimed, err := ClaimMeteorTask("audio", task.ID, task.UserID)
+		if err != nil {
+			return task, err
+		}
+		if !claimed {
+			task.Status = "result_expired"
+			task.ErrorDetail = "原任务结果已清理；不会按此编号重复提交，请在主站记录查看。"
+			return task, ErrMeteorTaskExists
+		}
 	}
 	saved := task
 	var err error
@@ -75,6 +102,9 @@ func SaveCanvasAudioTask(task model.CanvasAudioTask) (model.CanvasAudioTask, err
 }
 
 func CanvasAudioTaskResponse(task model.CanvasAudioTask) map[string]any {
+	if MeteorEnabled() && strings.HasPrefix(task.StorageKey, "server:") {
+		task.AudioURL = MeteorMediaURL(strings.TrimPrefix(task.StorageKey, "server:"))
+	}
 	result := map[string]any{
 		"id":           task.ID,
 		"object":       "canvas.audio.task",

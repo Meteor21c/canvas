@@ -11,11 +11,12 @@ import (
 )
 
 type UserConfigPayload struct {
-	ModelConfig      json.RawMessage       `json:"modelConfig,omitempty"`
-	StorageProvider  *UserStorageProviders `json:"storageProvider,omitempty"`
-	ImageHistory     json.RawMessage       `json:"imageHistory,omitempty"`
-	AssetData        json.RawMessage       `json:"assetData,omitempty"`
-	SyncCapabilities map[string]bool       `json:"syncCapabilities,omitempty"`
+	PublicChannels   []model.PublicModelChannelInfo `json:"publicChannels,omitempty"`
+	ModelConfig      json.RawMessage                `json:"modelConfig,omitempty"`
+	StorageProvider  *UserStorageProviders          `json:"storageProvider,omitempty"`
+	ImageHistory     json.RawMessage                `json:"imageHistory,omitempty"`
+	AssetData        json.RawMessage                `json:"assetData,omitempty"`
+	SyncCapabilities map[string]bool                `json:"syncCapabilities,omitempty"`
 }
 
 type StorageObjectProviderInput struct {
@@ -56,6 +57,9 @@ type userLocalModelChannelInput struct {
 }
 
 func SelectUserLocalModelChannelForModel(userID string, modelName string, channelID string) (model.ModelChannel, error) {
+	if MeteorEnabled() {
+		return model.ModelChannel{}, errors.New("仅支持本人主站密钥渠道")
+	}
 	userID = strings.TrimSpace(userID)
 	modelName = strings.TrimSpace(modelName)
 	channelID = strings.TrimSpace(channelID)
@@ -158,6 +162,19 @@ func CurrentUserConfig(ctx context.Context) (UserConfigPayload, error) {
 			"assets":    true,
 		},
 	}
+	if MeteorEnabled() {
+		channels, err := MeteorPublicChannels(user.ID)
+		if err != nil {
+			return result, err
+		}
+		result.PublicChannels = channels
+		result.ModelConfig = json.RawMessage(`{"mode":"remote","localChannels":[],"syncConfig":true}`)
+		if ok {
+			result.ImageHistory = json.RawMessage(config.ImageHistory)
+			result.AssetData = json.RawMessage(config.AssetData)
+		}
+		return result, nil
+	}
 	if !ok {
 		return result, nil
 	}
@@ -199,6 +216,9 @@ func readUserStorageProviders(raw string) UserStorageProviders {
 }
 
 func SaveCurrentUserModelConfig(ctx context.Context, raw json.RawMessage) (UserConfigPayload, error) {
+	if MeteorEnabled() {
+		return CurrentUserConfig(ctx)
+	}
 	user, ok := UserFromContext(ctx)
 	if !ok || user.ID == "" {
 		return UserConfigPayload{}, errors.New("请先登录")
@@ -248,6 +268,14 @@ func CurrentUserImageHistory(ctx context.Context) (json.RawMessage, error) {
 }
 
 func SaveCurrentUserImageHistory(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if MeteorEnabled() {
+		if len(raw) > 1<<20 {
+			return nil, errors.New("数据不能超过1 MiB")
+		}
+		if err := MeteorValidateMetadata(raw); err != nil {
+			return nil, err
+		}
+	}
 	config, err := saveCurrentUserConfigField(ctx, func(config *model.UserConfig) {
 		config.ImageHistory = string(raw)
 	})
@@ -269,6 +297,14 @@ func CurrentUserAssetData(ctx context.Context) (json.RawMessage, error) {
 }
 
 func SaveCurrentUserAssetData(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if MeteorEnabled() {
+		if len(raw) > 1<<20 {
+			return nil, errors.New("数据不能超过1 MiB")
+		}
+		if err := MeteorValidateMetadata(raw); err != nil {
+			return nil, err
+		}
+	}
 	config, err := saveCurrentUserConfigField(ctx, func(config *model.UserConfig) {
 		config.AssetData = string(raw)
 	})

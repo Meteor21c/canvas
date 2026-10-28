@@ -144,10 +144,26 @@ func ListUserVideoTasks(userID string, source string, limit int) ([]map[string]a
 }
 
 func DeleteUserVideoTask(userID string, id string) error {
+	if MeteorEnabled() {
+		task, found, _ := GetUserVideoTask(userID, id)
+		if found && !IsCompletedVideoTaskStatus(task.Status) && !IsFailedVideoTaskStatus(task.Status) {
+			return ErrMeteorSession
+		}
+	}
+	if MeteorEnabled() {
+		db, err := repository.DB()
+		if err != nil {
+			return err
+		}
+		return db.Model(&model.VideoTask{}).Where("user_id = ? AND id = ?", userID, id).Update("source", "meteor-hidden").Error
+	}
 	return repository.DeleteUserVideoTask(strings.TrimSpace(userID), strings.TrimSpace(id))
 }
 
 func VideoTaskResponse(task model.VideoTask) map[string]any {
+	if MeteorEnabled() && IsCompletedVideoTaskStatus(task.Status) {
+		task.VideoURL = MeteorVideoURL(task.ID)
+	}
 	result := map[string]any{
 		"id":            task.ID,
 		"object":        "video",
@@ -222,6 +238,7 @@ func WakeVideoTaskPoller() {
 }
 
 func runVideoTaskPoller() {
+	pollSlots := make(chan struct{}, 2)
 	inFlight := sync.Map{}
 	lastCleanupAt := time.Time{}
 	lastImageCleanupAt := time.Time{}
@@ -274,19 +291,19 @@ func runVideoTaskPoller() {
 				break
 			}
 			if (len(tasks) > 0 || len(workflowTasks) > 0) && (lastCleanupAt.IsZero() || current.Sub(lastCleanupAt) >= videoTaskCleanupInterval) {
-				if err := repository.DeleteFinishedVideoTasksBefore(videoTaskTime(current.Add(-videoTaskFinishedRetention))); err != nil {
+				if err := repository.DeleteFinishedVideoTasksBefore(videoTaskTime(current.Add(-meteorVideoRetention()))); err != nil {
 					log.Printf("cleanup finished video tasks failed err=%v", err)
 				}
 				lastCleanupAt = current
 			}
 			if hasImageTasks && (lastImageCleanupAt.IsZero() || current.Sub(lastImageCleanupAt) >= videoTaskCleanupInterval) {
-				if err := repository.DeleteFinishedCanvasImageTasksBefore(videoTaskTime(current.Add(-videoTaskFinishedRetention))); err != nil {
+				if err := repository.DeleteFinishedCanvasImageTasksBefore(videoTaskTime(current.Add(-meteorVideoRetention()))); err != nil {
 					log.Printf("cleanup finished canvas image tasks failed err=%v", err)
 				}
 				lastImageCleanupAt = current
 			}
 			if hasAudioTasks && (lastAudioCleanupAt.IsZero() || current.Sub(lastAudioCleanupAt) >= videoTaskCleanupInterval) {
-				if err := repository.DeleteFinishedCanvasAudioTasksBefore(videoTaskTime(current.Add(-videoTaskFinishedRetention))); err != nil {
+				if err := repository.DeleteFinishedCanvasAudioTasksBefore(videoTaskTime(current.Add(-meteorVideoRetention()))); err != nil {
 					log.Printf("cleanup finished canvas audio tasks failed err=%v", err)
 				}
 				lastAudioCleanupAt = current
@@ -296,6 +313,10 @@ func runVideoTaskPoller() {
 					continue
 				}
 				go func(task model.VideoTask) {
+					if MeteorEnabled() {
+						pollSlots <- struct{}{}
+						defer func() { <-pollSlots }()
+					}
 					defer inFlight.Delete(task.ID)
 					poll := currentVideoTaskPoller()
 					if poll == nil {
@@ -461,4 +482,11 @@ func clampProgress(value int) int {
 		return 100
 	}
 	return value
+}
+
+func meteorVideoRetention() time.Duration {
+	if MeteorEnabled() {
+		return meteorMediaTTL
+	}
+	return videoTaskFinishedRetention
 }

@@ -11,12 +11,12 @@ self.addEventListener("message", (event) => {
 });
 self.addEventListener("fetch", (event) => {
     const url = new URL(event.request.url);
-    if (!url.pathname.startsWith("/webdav-media/")) return;
+    if (!url.pathname.startsWith("/studio/webdav-media/")) return;
     event.respondWith(streamWebDAVMedia(event, url));
 });
 
 async function streamWebDAVMedia(event, url) {
-    const parts = url.pathname.slice("/webdav-media/".length).split("/");
+    const parts = url.pathname.slice("/studio/webdav-media/".length).split("/");
     const id = decodeURIComponent(parts.shift() || "");
     const objectKey = decodeURIComponent(parts.join("/"));
     const config = configs.get(id) || await requestConfig(event.clientId, id);
