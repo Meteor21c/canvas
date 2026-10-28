@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { App, Button } from "antd";
 import { initializeMeteorCanvas, clearMeteorCanvasSession } from "@/services/api/meteor-gateway";
+import { cleanupExpiredMedia } from "@/services/meteor-media-cache";
 import { clearCanvasSession, hydrateCanvasProjects, useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -51,7 +52,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         window.addEventListener("storage", onStorage);
         document.addEventListener("visibilitychange", onVisibility);
         window.addEventListener("beforeunload", onBeforeUnload);
-        return () => { disposed = true; serial.current++; window.removeEventListener("storage", onStorage); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("beforeunload", onBeforeUnload); clearCanvasSession(); clearMeteorCanvasSession(); };
+        const cleanupTimer = window.setInterval(() => { if (useCanvasStore.getState().hydrated) void cleanupExpiredMedia().catch(() => undefined); }, 60000);
+        return () => { window.clearInterval(cleanupTimer); disposed = true; serial.current++; window.removeEventListener("storage", onStorage); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("beforeunload", onBeforeUnload); clearCanvasSession(); clearMeteorCanvasSession(); };
     }, [publicPage]);
     if (publicPage) return <>{children}</>;
     if (!ready) return <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background p-8 text-foreground"><h1 className="text-xl font-medium">流星创作画布 · 试用</h1><p>{error || "正在验证站主身份并读取画布…"}</p>{error ? <a href="/login">返回流星 API 登录</a> : null}<a href="/">返回主站</a></main>;
