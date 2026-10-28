@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tigerowo/infinite-canvas/handler"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/service"
-	"github.com/gin-gonic/gin"
 )
 
 func AdminAuth(c *gin.Context) {
@@ -22,6 +22,13 @@ func AdminAuth(c *gin.Context) {
 }
 
 func UserAuth(c *gin.Context) {
+	// Video elements cannot attach the owner's bearer token. Only this exact
+	// matched GET route may use a valid short-lived content signature instead;
+	// its handler still resolves and validates the concrete stored task.
+	if service.MeteorEnabled() && c.Request.Method == http.MethodGet && c.FullPath() == "/api/v1/videos/:id/content" && service.MeteorAuthorizeVideo(c.Request, c.Param("id")) {
+		c.Next()
+		return
+	}
 	user, ok := authUser(c)
 	if !ok || user.Role == model.UserRoleGuest {
 		handler.FailWithStatus(c.Writer, http.StatusUnauthorized, "未登录或权限不足")
@@ -44,7 +51,9 @@ func NotFoundJSON(c *gin.Context) {
 }
 
 func authUser(c *gin.Context) (model.AuthUser, bool) {
-	if service.MeteorEnabled() { return service.UserFromContext(c.Request.Context()) }
+	if service.MeteorEnabled() {
+		return service.UserFromContext(c.Request.Context())
+	}
 	token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
 	if strings.TrimSpace(token) == "" {
 		return model.AuthUser{}, false

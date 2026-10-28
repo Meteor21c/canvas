@@ -36,6 +36,17 @@ test("internal redirects cannot reveal a service location or relay credentials",
     const result = await route.GET(request("files/a/content"), context("files/a/content"));
     expect(result.status).toBe(502); expect(result.headers.get("Location")).toBeNull(); expect(result.headers.get("Set-Cookie")).toBeNull();
 });
+test("signed media reaches the exact content endpoint with its query and no invented identity", async () => {
+    reply = () => new Response("media", { headers: { "Content-Type": "video/mp4" } });
+    for (const path of ["files/file-id/content", "v1/videos/video-id/content"]) {
+        const query = "?expires=1793200000&signature=test-signature";
+        const result = await route.GET(request(path + query), context(path));
+        expect(result.status).toBe(200);
+        expect(calls.at(-1)!.url).toBe(`http://127.0.0.1:8080/api/${path}${query}`);
+        expect((calls.at(-1)!.init!.headers as Headers).get("Authorization")).toBeNull();
+        expect(result.headers.get("Content-Security-Policy")).toContain("sandbox");
+    }
+});
 test("media does not execute upstream HTML/SVG and JSON does not set cookies", async () => {
     for (const type of ["text/html", "image/svg+xml", "application/javascript"]) {
         reply = () => new Response("untrusted", { headers: { "Content-Type": type } });
