@@ -8,25 +8,26 @@ import { safeCanvasProject, type CanvasProject } from "../stores/use-canvas-stor
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无限画布") {
     const zipFiles: { name: string; data: BlobPart }[] = [];
-    const exportedProjects = await Promise.all(
-        projects.map(async (project) => {
-            const files: CanvasExportAsset[] = [];
-            await Promise.all(
-                collectStorageKeys(project).map(async (storageKey) => {
-                    const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
-                    if (!blob) return;
-                    const path = `projects/${project.id}/files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
-                    files.push({ storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });
-                    zipFiles.push({ name: path, data: blob });
-                }),
-            );
-            return { project: safeCanvasProject(project), files };
-        }),
-    );
-
+    const assets = new Map<string, CanvasExportAsset>();
+    const keys = [...new Set(projects.flatMap(project => collectStorageKeys(project)))];
+    if (projects.length > 20 || keys.length > 128) throw new Error("单次导出最多 20 个工程和 128 张图片");
+    let bytes = 0;
+    for (const storageKey of keys) {
+        const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+        if (!blob) continue;
+        bytes += blob.size;
+        if (bytes > 128 * 1024 * 1024) throw new Error("导出图片超过 128 MiB，请分批导出");
+        const path = `media/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
+        assets.set(storageKey, { storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });
+        zipFiles.push({ name: path, data: blob });
+    }
+    const missing = keys.length - assets.size;
+    const exportedProjects = projects.map(project => ({ project: safeCanvasProject(project), files: collectStorageKeys(project).map(key => assets.get(key)).filter((asset): asset is CanvasExportAsset => Boolean(asset)) }));
     const data: CanvasExportFile = { app: "infinite-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
-    const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, ...zipFiles]);
+    const note = `流星创作画布导出\n\n本包仅包含当前浏览器可读取的图片。工程元数据不包含 API 密钥或临时签名链接。\n图片临时缓存保留 24 小时。\n本次已失效或不在当前浏览器的图片引用：${missing} 个。\n`;
+    const zip = await createZip([{ name: "projects.json", data: JSON.stringify(data, null, 2) }, { name: "export-info.txt", data: note }, ...zipFiles]);
     saveAs(zip, `${safeFileName(fileName)}.zip`);
+    if (missing) window.dispatchEvent(new CustomEvent("meteor-canvas:export-warning", { detail: `已导出工程；${missing} 个图片引用已过期或不在当前浏览器，包内 export-info.txt 已记录。` }));
 }
 
 function collectStorageKeys(value: unknown, keys = new Set<string>()) {

@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Meteor pilot: build the original React canvas only; no Go/SQLite service.
-FROM oven/bun:1.3.14 AS web-build
+FROM node:22-bookworm-slim AS web-build
+COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache

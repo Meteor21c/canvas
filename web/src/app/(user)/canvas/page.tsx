@@ -30,6 +30,7 @@ export default function CanvasPage() {
         router.push(`/canvas/${id}`);
     };
     const createAndEnter = () => { try { enterProject(createProject(`无限画布 ${projects.length + 1}`)); } catch (error) { message.error(error instanceof Error ? error.message : "无法新建画布"); } };
+    const exportSelected = () => { void exportCanvasProjects(projects.filter(project => selectedIds.includes(project.id)), `无限画布-${selectedIds.length}个项目`).catch(error => message.error(error instanceof Error ? error.message : "导出失败")); };
     const importCanvas = async (file?: File) => {
         if (!file) return;
         try {
@@ -46,6 +47,7 @@ export default function CanvasPage() {
             const remap = new Map<string, string>();
             for (const item of prepared) for (const asset of item.files) {
                 if (typeof asset.storageKey !== "string" || !asset.storageKey.startsWith("image:") || !["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"].includes(asset.mimeType)) throw new Error("试用版只能导入图片素材");
+                if (remap.has(asset.storageKey)) continue;
                 const blob = zip.get(asset.path);
                 if (!blob) continue;
                 const key = `image:${nanoid()}`;
@@ -76,7 +78,7 @@ export default function CanvasPage() {
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `无限画布-${selectedIds.length}个项目`)}>
+                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={exportSelected}>
                                     导出选中
                                 </Button>
                                 <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>

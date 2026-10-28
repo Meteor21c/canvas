@@ -3,11 +3,12 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Button } from "antd";
+import { App, Button } from "antd";
 import { initializeMeteorCanvas, clearMeteorCanvasSession } from "@/services/api/meteor-gateway";
 import { clearCanvasSession, hydrateCanvasProjects, useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
+    const { message } = App.useApp();
     const pathname = usePathname();
     const publicPage = /\/(?:source|pilot-health)\/?$/.test(pathname);
     const [ready, setReady] = useState(false);
@@ -16,6 +17,11 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const syncError = useCanvasStore(state => state.syncError);
     const saving = useCanvasStore(state => state.saving);
     const retrySaves = useCanvasStore(state => state.retrySaves);
+    useEffect(() => {
+        const onExportWarning = (event: Event) => message.warning((event as CustomEvent<string>).detail);
+        window.addEventListener("meteor-canvas:export-warning", onExportWarning);
+        return () => window.removeEventListener("meteor-canvas:export-warning", onExportWarning);
+    }, [message]);
     useEffect(() => {
         if (publicPage) return;
         let disposed = false;

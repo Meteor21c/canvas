@@ -41,6 +41,7 @@ const revisions = new Map<string, number>();
 const running = new Set<string>();
 const queued = new Set<string>();
 const blocked = new Set<string>();
+const deleting = new Set<string>();
 const MAX_PROJECTS = 20;
 const MAX_PROJECT_BYTES = 1024 * 1024;
 const MAX_OWNER_BYTES = 10 * MAX_PROJECT_BYTES;
@@ -50,11 +51,12 @@ export function safeCanvasProject(project: CanvasProject): CanvasProject {
     if (!project || !Array.isArray(project.nodes) || !Array.isArray(project.connections)) throw new Error("画布格式无效");
     if (project.nodes.length > 300 || project.connections.length > 600) throw new Error("试用画布最多 300 个节点和 600 条连线");
     const safe = JSON.parse(JSON.stringify(project, (key, value) => {
-        if (/(?:api.?key|password|secret|authorization|access.?token|refresh.?token|agent.?token|agent.?url)/i.test(key)) return undefined;
+        if (/(?:^token$|^bearer$|api.?key|password|secret|authorization|access.?token|refresh.?token|agent.?token|agent.?url)/i.test(key)) return undefined;
         if (typeof value === "string" && /^(?:data:|blob:)/i.test(value)) return "";
         if (typeof value === "string" && /^https?:\/\//i.test(value)) {
             try { const url = new URL(value); if (url.search || url.hash || url.username || url.password) return ""; } catch { return ""; }
         }
+        if (typeof value === "string" && /^\/(?:api|v1|media|files)\//.test(value) && /[?#]/.test(value)) return "";
         return value;
     })) as CanvasProject;
     safe.nodes = safe.nodes.filter(node => [CanvasNodeType.Text, CanvasNodeType.Image, CanvasNodeType.Group].includes(node.type)).map(node => ({
@@ -87,12 +89,13 @@ function changed(project: CanvasProject) {
     useCanvasStore.setState({ saving: true });
     persistLocal();
     queued.add(project.id);
+    if (deleting.has(project.id)) return;
     const timer = timers.get(project.id);
     if (timer) clearTimeout(timer);
     timers.set(project.id, setTimeout(() => { timers.delete(project.id); void flushProject(project.id); }, 650));
 }
 async function flushProject(id: string) {
-    if (running.has(id) || blocked.has(id) || !queued.has(id) || !activeOwner) return;
+    if (running.has(id) || blocked.has(id) || deleting.has(id) || !queued.has(id) || !activeOwner) return;
     const owner = activeOwner, generation = epoch;
     const token = useUserStore.getState().token;
     const project = useCanvasStore.getState().openProject(id);
@@ -128,12 +131,15 @@ function checkQuota(projects: CanvasProject[]) {
     if (bytes > MAX_OWNER_BYTES) throw new Error("画布元数据总量超过 10 MiB，请先导出备份");
 }
 export async function waitForCanvasWrites(ids: string[]) {
-    for (const id of ids) { const timer = timers.get(id); if (timer) clearTimeout(timer); timers.delete(id); queued.delete(id); }
+    for (const id of ids) { deleting.add(id); const timer = timers.get(id); if (timer) clearTimeout(timer); timers.delete(id); queued.delete(id); }
     const deadline = Date.now() + 20000;
     while (ids.some(id => running.has(id))) {
         if (Date.now() > deadline) throw new Error("画布仍在保存，请稍后再删除");
         await new Promise(resolve => setTimeout(resolve, 100));
     }
+}
+export function finishCanvasDeletion(ids: string[], success: boolean) {
+    for (const id of ids) { deleting.delete(id); if (!success && useCanvasStore.getState().openProject(id)) { queued.add(id); void flushProject(id); } }
 }
 export function clearCanvasSession() {
     if (activeOwner && useCanvasStore.getState().hydrated) {
@@ -142,7 +148,7 @@ export function clearCanvasSession() {
     epoch++; activeOwner = "";
     timers.forEach(timer => clearTimeout(timer)); timers.clear();
     if (localTimer) clearTimeout(localTimer);
-    queued.clear(); blocked.clear(); revisions.clear(); running.clear();
+    queued.clear(); blocked.clear(); deleting.clear(); revisions.clear(); running.clear();
     useCanvasStore.setState({ hydrated: false, projects: [], saving: false, syncError: "", lastSavedAt: "" });
 }
 export async function hydrateCanvasProjects() {

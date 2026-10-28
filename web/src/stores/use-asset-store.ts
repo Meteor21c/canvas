@@ -212,7 +212,7 @@ export const useAssetStore = create<AssetStore>()(
         {
             name: "meteor-canvas:disabled-asset-library",
             storage: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
-            partialize: () => ({ assets: [] }) as StorageValue<AssetStore>["state"],
+            partialize: () => ({ assets: [] }) as unknown as StorageValue<AssetStore>["state"],
         },
     ),
 );
