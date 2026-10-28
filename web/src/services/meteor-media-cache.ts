@@ -112,6 +112,9 @@ export async function getMedia(key: string): Promise<Blob | null> {
     const record = await cache.getItem<RecordValue>(target);
     checkOwner(owner);
     if (!record || record.expires <= Date.now()) {
+        const staleUrl = urls.get(target);
+        if (staleUrl) URL.revokeObjectURL(staleUrl);
+        urls.delete(target);
         if (record) await cache.removeItem(target);
         return null;
     }

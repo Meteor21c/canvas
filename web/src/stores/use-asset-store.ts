@@ -205,61 +205,14 @@ export const useAssetStore = create<AssetStore>()(
                 if (syncTimer) window.clearTimeout(syncTimer);
                 syncTimer = null;
             },
-            cleanupImages: (extra, storageKeys, ownerToken) => {
-                window.setTimeout(async () => {
-                    const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
-                    const { loadLocalAgentSkills, useAgentSkillStore } = await import("@/stores/use-agent-skill-store");
-                    const logKeys: string[] = [];
-                    try {
-                        const localforage = (await import("localforage")).default;
-                        const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-                        await imageLogStore.iterate((log: any) => {
-                            if (log) {
-                                if (Array.isArray(log.images)) {
-                                    log.images.forEach((img: any) => {
-                                        if (img && img.storageKey) logKeys.push(img.storageKey);
-                                    });
-                                }
-                                if (Array.isArray(log.references)) {
-                                    log.references.forEach((ref: any) => {
-                                        if (ref && ref.storageKey) logKeys.push(ref.storageKey);
-                                    });
-                                }
-                            }
-                        });
-                        const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
-                        await videoLogStore.iterate((log: any) => {
-                            if (log) {
-                                if (log.video && log.video.storageKey) {
-                                    logKeys.push(log.video.storageKey);
-                                }
-                                if (Array.isArray(log.references)) {
-                                    log.references.forEach((ref: any) => {
-                                        if (ref && ref.storageKey) logKeys.push(ref.storageKey);
-                                    });
-                                }
-                            }
-                        });
-                    } catch (e) {
-                        console.error("Error gathering log keys in cleanupImages", e);
-                    }
-
-                    try {
-                        await useAgentSkillStore.getState().loadSkills();
-                        const skillStore = useAgentSkillStore.getState();
-                        const localSkills = useUserStore.getState().token ? await loadLocalAgentSkills() : [];
-                        await cleanupUnusedImages({ assets: get().assets, projects: useCanvasStore.getState().projects, skills: [...skillStore.systemSkills, ...skillStore.userSkills, ...localSkills], extra, logKeys }, storageKeys, ownerToken);
-                    } catch (error) {
-                        console.error("Error gathering Skill keys in cleanupImages", error);
-                    }
-                    await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra, logKeys });
-                }, 0);
-            },
+            // Pilot media expires through the bounded owner-scoped cache; the old
+            // anonymous asset/agent stores must not read or delete its files.
+            cleanupImages: () => {},
         }),
         {
-            name: ASSET_STORE_KEY,
-            storage: assetStorage,
-            partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
+            name: "meteor-canvas:disabled-asset-library",
+            storage: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+            partialize: () => ({ assets: [] }) as StorageValue<AssetStore>["state"],
         },
     ),
 );

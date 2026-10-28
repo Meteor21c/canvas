@@ -157,8 +157,10 @@ describe("media URL and local cache limits", () => {
         state.user = { id: "2", role: "admin" };
         expect(await cache.getMedia("image:a")).toBeNull();
         state.user = { id: "1", role: "admin" };
+        const expiredObjectUrl = await cache.mediaObjectUrl("image:a");
         const record = media.get("1:image:a")!; record.expires = Date.now() - 1;
         expect(await cache.getMedia("image:a")).toBeNull();
+        expect(() => cache.safeMediaUrl(expiredObjectUrl)).toThrow("引用已过期");
         expect(media.has("1:image:a")).toBe(false);
         const outcomes = await Promise.allSettled(Array.from({ length: 129 }, (_, index) => cache.putMedia(`image:${index}`, blob)));
         expect(outcomes.filter(item => item.status === "fulfilled")).toHaveLength(128);
