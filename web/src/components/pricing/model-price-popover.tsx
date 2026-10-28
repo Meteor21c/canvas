@@ -22,7 +22,7 @@ export function ModelPricePopover({ config, model, channelId, kind }: { config: 
                 <div data-model-price-popup className="text-sm" onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
                     <div className="mb-2 max-w-72 truncate font-medium" title={model}>{model}</div>
                     {kind ? <PriceSummary config={config} capability={kind} model={model} channelId={channelId} enabled={open} compact />
-                        : <div className="text-xs leading-relaxed text-muted-foreground">当前创作台提供图片与视频报价。此模型的费用以主站用量记录为准。<Link className="mt-2 block underline" href="/pricing">查看计价标准</Link></div>}
+                        : <div className="text-xs leading-relaxed text-muted-foreground">暂无该模型的报价。<Link className="mt-2 block underline" href="/pricing">查看计价标准</Link></div>}
                 </div>
             }>
                 <button type="button" aria-label={`查看 ${model} 价格`} aria-expanded={open} className="rounded px-1.5 py-1 text-[11px] text-foreground/60 underline decoration-foreground/20 underline-offset-2 transition hover:bg-foreground/5 hover:text-foreground focus-visible:outline focus-visible:outline-1" onClick={event => event.stopPropagation()}>价格</button>

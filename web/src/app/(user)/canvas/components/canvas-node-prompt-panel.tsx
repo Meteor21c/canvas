@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
@@ -66,6 +67,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
     const [expanded, setExpanded] = useState(false);
+    const [compactViewport, setCompactViewport] = useState(false);
     const workflowRef = node.metadata?.workflowRef;
     const billingModel = workflowRef
         ? `workflow:${workflowRef.scope}:${workflowRef.channelId}:${workflowRef.kind}:${workflowRef.workflowId}`
@@ -75,6 +77,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     useEffect(() => {
         setPrompt(sourcePrompt);
     }, [node.id, sourcePrompt]);
+
+    useEffect(() => {
+        const query = window.matchMedia("(max-width: 639px)");
+        const update = () => setCompactViewport(query.matches);
+        update();
+        query.addEventListener("change", update);
+        return () => query.removeEventListener("change", update);
+    }, []);
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
@@ -89,10 +99,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onGenerate(node.id, mode, text);
     };
 
-    return (
+    const panel = (
         <div
             data-canvas-no-zoom
-            className="rounded-2xl border p-3 shadow-2xl backdrop-blur"
+            data-canvas-prompt-panel
+            aria-label="节点生成参数与费用"
+            className={"rounded-2xl border p-3 shadow-2xl backdrop-blur" + (compactViewport ? " thin-scrollbar fixed inset-x-3 bottom-24 z-[80] max-h-[calc(100dvh-168px)] overflow-y-auto overscroll-contain" : "")}
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -180,6 +192,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </Modal>
         </div>
     );
+    return compactViewport ? createPortal(panel, document.body) : panel;
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {

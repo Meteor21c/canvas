@@ -336,7 +336,7 @@ func ValidateMeteorVideo(ctx context.Context, userID, channelID, modelName strin
 	return errors.New("当前模型不支持所选清晰度、音频或参考视频组合")
 }
 func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput) (MeteorPrice, error) {
-	quote := MeteorPrice{Kind: input.Kind, Model: input.Model, ChannelID: input.ChannelID, BillingMode: "unknown", Unit: "unknown", Currency: "USD", Notice: "当前参数没有可确认的价格，最终金额以主站用量记录为准"}
+	quote := MeteorPrice{Kind: input.Kind, Model: input.Model, ChannelID: input.ChannelID, BillingMode: "unknown", Unit: "unknown", Currency: "USD", Notice: "当前参数暂无确定报价，按实际用量结算。"}
 	channel, err := MeteorSelectChannel(userID, input.Model, input.ChannelID)
 	if err != nil {
 		return quote, err
@@ -420,7 +420,7 @@ func meteorGrokVideoQuote(ctx context.Context, userID string, channel model.Mode
 		return quote, nil
 	}
 	quote.BillingMode, quote.Unit = "second", "second"
-	quote.Notice = "按实际生成时长在主站结算；主站未提供预扣金额与官方对比价"
+	quote.Notice = "按实际生成时长结算。"
 	for _, group := range groups {
 		if group.ID != groupID {
 			continue
@@ -494,6 +494,116 @@ type meteorPlazaGroup struct {
 	Models           []meteorPlazaModel `json:"models"`
 }
 
+type meteorActualImageGroup struct {
+	meteorPlazaGroup
+	Price1K *float64 `json:"image_price_1k"`
+	Price2K *float64 `json:"image_price_2k"`
+	Price4K *float64 `json:"image_price_4k"`
+}
+
+type meteorGroupImageOverride struct {
+	meteorPlazaPricing
+	Models      []string        `json:"models"`
+	TimePricing json.RawMessage `json:"time_pricing"`
+}
+
+// Main image billing resolves explicit group model rules first, then an
+// explicitly configured image size price, before channel/default token rates.
+// The plaza is a display catalogue and need not include every bindable group.
+func meteorActualImagePricing(ctx context.Context, token string, groupID int64, input MeteorQuoteInput) (meteorPlazaGroup, bool) {
+	var groups []meteorActualImageGroup
+	if meteorGet(ctx, "/api/v1/groups/available", token, &groups) != nil {
+		return meteorPlazaGroup{}, false
+	}
+	for _, actual := range groups {
+		if actual.ID != groupID {
+			continue
+		}
+		prices := map[string]*float64{"1K": actual.Price1K, "2K": actual.Price2K, "4K": actual.Price4K}
+		hasSizePrice := prices[meteorImageTier(input.Resolution, input.Size)] != nil
+		group := actual.meteorPlazaGroup
+		// Canvas is restricted to the authenticated site owner. Read only the
+		// pricing-rule fields from that owner's selected group; other admin
+		// fields (including operating costs) are never decoded or returned.
+		var configured struct {
+			Pricing []meteorGroupImageOverride `json:"model_pricing"`
+		}
+		if meteorGet(ctx, "/api/v1/admin/groups/"+strconv.FormatInt(groupID, 10), token, &configured) != nil {
+			return group, hasSizePrice
+		}
+		match := meteorMatchGroupImageOverride(configured.Pricing, input.Model)
+		if match == nil && !hasSizePrice {
+			return meteorPlazaGroup{}, false
+		}
+		var rates map[string]float64
+		if meteorGet(ctx, "/api/v1/groups/rates", token, &rates) != nil {
+			return group, true
+		}
+		if rate, ok := rates[strconv.FormatInt(groupID, 10)]; ok {
+			group.UserRate = &rate
+		}
+		entry := meteorPlazaModel{Name: input.Model}
+		if match != nil {
+			pricing := match.meteorPlazaPricing
+			if pricing.Mode == "" {
+				pricing.Mode = "token"
+			}
+			entry.Pricing, entry.TimePricing = &pricing, match.TimePricing
+		} else {
+			entry.Pricing = &meteorPlazaPricing{Mode: "image"}
+			for _, tier := range []string{"1K", "2K", "4K"} {
+				if price := prices[tier]; price != nil {
+					entry.Pricing.Intervals = append(entry.Pricing.Intervals, struct {
+						Tier  string   `json:"tier_label"`
+						Price *float64 `json:"per_request_price"`
+					}{tier, price})
+				}
+			}
+		}
+		group.Models = []meteorPlazaModel{entry}
+		return group, true
+	}
+	return meteorPlazaGroup{}, false
+}
+
+func meteorMatchGroupImageOverride(rules []meteorGroupImageOverride, modelName string) *meteorGroupImageOverride {
+	normalize := func(value string) string {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if strings.HasPrefix(value, "claude-") {
+			value = strings.ReplaceAll(value, ".", "-")
+		}
+		return value
+	}
+	name := normalize(modelName)
+	var wildcard *meteorGroupImageOverride
+	for i := range rules {
+		for _, pattern := range rules[i].Models {
+			pattern = normalize(pattern)
+			if pattern == name {
+				return &rules[i]
+			}
+			if strings.HasSuffix(pattern, "*") && strings.HasPrefix(name, strings.TrimSuffix(pattern, "*")) && wildcard == nil {
+				wildcard = &rules[i]
+			}
+		}
+	}
+	return wildcard
+}
+
+func meteorImageTimePricingConfigured(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var schedule struct {
+		Enabled *bool             `json:"enabled"`
+		Periods []json.RawMessage `json:"periods"`
+	}
+	if json.Unmarshal(raw, &schedule) != nil {
+		return true
+	}
+	return (schedule.Enabled == nil || *schedule.Enabled) && len(schedule.Periods) > 0
+}
+
 func meteorImageQuote(ctx context.Context, userID string, channel model.ModelChannel, input MeteorQuoteInput, quote MeteorPrice) (MeteorPrice, error) {
 	if channel.ModelCapabilities[input.Model] != "image" || channel.Protocol != "openai" {
 		return quote, errors.New("当前模型未开放图片生成")
@@ -513,7 +623,9 @@ func meteorImageQuote(ctx context.Context, userID string, channel model.ModelCha
 	var plaza struct {
 		Groups []meteorPlazaGroup `json:"groups"`
 	}
-	if meteorGet(ctx, "/api/v1/model-plaza", token, &plaza) != nil {
+	if actual, handled := meteorActualImagePricing(ctx, token, groupID, input); handled {
+		plaza.Groups = []meteorPlazaGroup{actual}
+	} else if meteorGet(ctx, "/api/v1/model-plaza", token, &plaza) != nil {
 		return quote, nil
 	}
 	for _, group := range plaza.Groups {
@@ -572,7 +684,7 @@ func meteorImageQuote(ctx context.Context, userID string, channel model.ModelCha
 				if price != nil {
 					quote.EstimatedAmount = meteorNumber(*price * rate * float64(input.Count))
 					quote.Exact = true
-					quote.Notice = "按本次所选尺寸与数量计费，实际余额变动以主站结算为准"
+					quote.Notice = "按所选尺寸与数量计费。"
 				}
 				return quote, nil
 			}
@@ -599,9 +711,9 @@ func meteorImageQuote(ctx context.Context, userID string, channel model.ModelCha
 					rate *= *group.PeakRate
 				}
 			}
-			if len(pricing.Intervals) > 0 || len(entry.TimePricing) > 0 && string(entry.TimePricing) != "null" {
+			if len(pricing.Intervals) > 0 || meteorImageTimePricingConfigured(entry.TimePricing) {
 				quote.Available = false
-				quote.Notice = "此模型采用分档或分时计价，请查看主站完整价格，最终按实际用量结算"
+				quote.Notice = "当前参数暂无确定报价，按实际用量结算。"
 				return quote, nil
 			}
 			quote.TokenPrices = map[string]*string{"inputPerMillion": meteorMultiply(pricing.Input, rate*1e6), "outputPerMillion": meteorMultiply(pricing.Output, rate*1e6), "cacheReadPerMillion": meteorMultiply(pricing.Cache, rate*1e6), "imageInputPerMillion": meteorMultiply(pricing.ImageInput, rate*1e6), "imageOutputPerMillion": meteorMultiply(pricing.ImageOutput, rate*1e6)}
@@ -624,7 +736,7 @@ func meteorImageQuote(ctx context.Context, userID string, channel model.ModelCha
 					}
 				}
 			}
-			quote.Notice = "按实际输入、缓存与图像输出Token计费，生成前无法确认每张总价或预扣金额"
+			quote.Notice = "按实际输入、缓存与图像输出 Token 结算，生成前无法确定总价。"
 			return quote, nil
 		}
 	}

@@ -5229,11 +5229,11 @@ function CanvasTopBar({
 
     return (
         <>
-            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
-                <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between gap-2 px-3 max-sm:z-[90] max-sm:bg-background/95 max-sm:backdrop-blur-sm sm:px-4">
+                <div className="pointer-events-auto flex min-w-0 items-center gap-1 sm:gap-3">
                     <button type="button" onClick={onProjects} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium shadow-sm" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}><Images className="size-3.5" /><span>我的画布</span></button>
-                    <button type="button" onClick={onHome} className="hidden h-9 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs sm:inline-flex" style={{ color: theme.node.text }}><Home className="size-3.5" /><span>首页</span></button>
-                    <button type="button" onClick={onToggleSidePanel} className="grid size-7 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={sidePanelOpen ? "收起左侧面板" : "展开左侧面板"}>
+                    <button type="button" onClick={onHome} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs" style={{ color: theme.node.text }}><Home className="size-3.5" /><span>首页</span></button>
+                    <button type="button" onClick={onToggleSidePanel} className="hidden size-7 place-items-center rounded-full transition hover:bg-black/5 sm:grid dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label={sidePanelOpen ? "收起左侧面板" : "展开左侧面板"}>
                         {sidePanelOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
                     </button>
                     <Dropdown
@@ -5258,7 +5258,7 @@ function CanvasTopBar({
                         </button>
                     </Dropdown>
 
-                    <div ref={titleRef} className="flex min-w-0 items-center gap-2">
+                    <div ref={titleRef} className="hidden min-w-0 items-center gap-2 sm:flex">
                         {isTitleEditing ? (
                             <input
                                 autoFocus
@@ -5285,7 +5285,7 @@ function CanvasTopBar({
                     </div>
                 </div>
 
-                <div className="pointer-events-auto flex items-center gap-1.5">
+                <div className="pointer-events-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
                     <UserStatusActions
                         variant="canvas"
                         accountOpen={accountOpen}
@@ -5299,15 +5299,16 @@ function CanvasTopBar({
                     />
                     {assistantCollapsed ? (
                         <>
-                            <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
+                            <span className="hidden h-6 w-px sm:block" style={{ background: theme.toolbar.border }} />
                             <Button
                                 type="text"
-                                className="!h-10 !rounded-xl !px-3 !font-medium"
+                                className="!size-8 !rounded-xl !px-0 !font-medium sm:!h-10 sm:!w-auto sm:!px-3"
                                 style={{ background: theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
                                 icon={<Bot className="size-4" />}
                                 onClick={onExpandAssistant}
+                                aria-label="打开 Agent"
                             >
-                                Agent
+                                <span className="hidden sm:inline">Agent</span>
                             </Button>
                         </>
                     ) : null}

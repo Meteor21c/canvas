@@ -43,6 +43,10 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     const avatarStyle: CSSProperties | undefined = variant === "canvas" ? { borderColor: canvasTheme.toolbar.border, color: canvasTheme.node.text, background: "transparent" } : undefined;
     const menuItems: ItemType[] = [
         { key: "user", disabled: true, label: <span className="font-medium text-current">{userName}</span> },
+        ...(variant === "canvas" ? [
+            { key: "balance", disabled: true, label: `余额 ${balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}` },
+            { key: "theme", label: theme === "dark" ? "切换到浅色主题" : "切换到深色主题", onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
+        ] : []),
         { key: "main-site", label: <a href="/">流星 API</a> },
         ...(onOpenShortcuts ? [{ key: "shortcuts", icon: <Keyboard className="size-4" />, label: "快捷键", onClick: onOpenShortcuts }] : []),
         { type: "divider" },
@@ -56,15 +60,15 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
+            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "canvas" && "hidden sm:inline-flex")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
             <VersionReleaseModal
-                className={variant === "default" ? "hidden shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 sm:inline-flex dark:text-stone-400 dark:hover:text-white" : undefined}
+                className={variant === "default" ? "hidden shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 sm:inline-flex dark:text-stone-400 dark:hover:text-white" : "hidden sm:inline-flex"}
                 style={versionStyle}
             />
-            <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", gitHubClassName, variant === "default" && "hidden sm:inline-flex")} style={gitHubStyle} />
+            <GitHubLink className={cn("hidden bg-transparent hover:bg-transparent sm:inline-flex dark:hover:bg-transparent", gitHubClassName)} style={gitHubStyle} />
             {variant === "canvas" && user ? (
                 <Tooltip title="账户可用余额" placement="bottom">
-                    <div className="flex h-8 shrink-0 items-center gap-1.5 px-1.5 text-xs font-medium tabular-nums opacity-75 transition hover:opacity-100" style={{ color: canvasTheme.node.text }}>
+                    <div className="hidden h-8 shrink-0 items-center gap-1.5 px-1.5 text-xs font-medium tabular-nums opacity-75 transition hover:opacity-100 sm:flex" style={{ color: canvasTheme.node.text }}>
                         <span>余额</span>
                         <span>{balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
                     </div>
