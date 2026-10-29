@@ -2426,7 +2426,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
             if (!url) throw new Error("素材不可用，请重新打开画布后重试");
-            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
+            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
         } catch (error) { message.error(error instanceof Error ? error.message : "下载失败，请稍后重试"); }
     }, [message]);
 
