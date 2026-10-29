@@ -166,6 +166,7 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 	}
 	result := map[string]any{
 		"id":            task.ID,
+		"can_cancel":    !MeteorEnabled(),
 		"object":        "video",
 		"model":         task.Model,
 		"channelId":     task.ChannelID,

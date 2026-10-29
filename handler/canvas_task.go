@@ -28,7 +28,7 @@ import (
 
 func StopCanvasTask(w http.ResponseWriter, r *http.Request) {
 	if service.MeteorEnabled() {
-		FailWithStatus(w, 409, "此操作不能撤销上游已受理的付费请求，请等待任务结果；不会声明退款。")
+		FailWithStatus(w, 409, "任务已提交，暂不支持取消，将继续获取生成结果。")
 		return
 	}
 	user, ok := service.UserFromContext(r.Context())

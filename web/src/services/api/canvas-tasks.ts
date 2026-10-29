@@ -1,5 +1,5 @@
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
-import { apiGet, apiPost } from "@/services/api/request";
+import { apiGet, apiPost, StudioApiError } from "@/services/api/request";
 import { useUserStore } from "@/stores/use-user-store";
 
 export async function listCanvasProjects(token: string) {
@@ -31,7 +31,12 @@ export async function syncCanvasProjects(
 export async function stopCanvasTask(kind: "image" | "video" | "audio", id: string, workflow: boolean, source: "canvas" | "video-workbench" = "canvas") {
     const token = useUserStore.getState().token;
     if (!token) throw new Error("请先登录后再停止云端任务");
-    return apiPost<{ stopped: boolean }>("/studio/api/v1/canvas/tasks/stop", { kind, id, workflow, source }, token);
+    try {
+        return await apiPost<{ stopped: boolean; message?: string }>("/studio/api/v1/canvas/tasks/stop", { kind, id, workflow, source }, token);
+    } catch (error) {
+        if (error instanceof StudioApiError && error.status === 409) return { stopped: false, message: error.message };
+        throw error;
+    }
 }
 
 export async function deleteCanvasProjects(ids: string[]) {

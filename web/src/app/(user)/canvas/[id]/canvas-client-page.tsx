@@ -519,6 +519,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 if (kind !== "video" || run.backend === "workflow") await run.submission?.catch(() => undefined);
                 const result = await stopCanvasTask(kind, id, run.backend === "workflow");
                 if (!result.stopped) {
+                    if (result.message) message.info(result.message);
                     updateTaskNodes((prev) => prev.map((item) =>
                         ((item.id === nodeId && item.metadata?.clientTaskId === id)
                             || (item.id === root?.id && item.metadata?.primaryImageId === nodeId && item.metadata?.imageTaskId === root?.metadata?.imageTaskId))

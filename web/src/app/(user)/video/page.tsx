@@ -1013,6 +1013,10 @@ export default function VideoPage() {
     const stopVideoTask = async (logId: string) => {
         const log = logsRef.current.find((item) => item.id === logId);
         if (!log?.task || (log.status !== "生成中" && log.status !== "停止中")) return;
+        if (log.task.can_cancel === false) {
+            message.info("任务已提交，暂不支持取消，将继续获取生成结果。");
+            return;
+        }
         const run: VideoTaskRun = videoTaskRunsRef.current.get(logId) || { id: log.task.id, controller: new AbortController(), backend: log.taskBackend };
         if (run.stopping) return;
         run.stopping = true;
@@ -1030,6 +1034,7 @@ export default function VideoPage() {
                 if (run.backend) {
                     const result = await stopCanvasTask("video", run.id, run.backend === "workflow" && isClientVideoTaskId(run.id), "video-workbench");
                     if (!result.stopped) {
+                        if (result.message) message.info(result.message);
                         await Promise.allSettled([savingStop, run.poll]);
                         if (!active()) return;
                         if (run.settledLog) {
@@ -1343,7 +1348,7 @@ export default function VideoPage() {
             setResults((value) =>
                 mergePendingLogResults(
                     value,
-                    mergedLogs.filter((log) => log.status === "生成中" && log.task && !log.video),
+                    mergedLogs,
                 ),
             );
             return mergedLogs;
@@ -2440,7 +2445,7 @@ function PendingVideoCard({ result, now, onCopyPrompt, onStop, onRetry, onDelete
                     {stopped ? <Square className="size-6" /> : <LoaderCircle className="size-6 animate-spin" />}
                     {stopped || stopping ? <span>{stopped ? "已停止" : result.error ? "停止未确认" : "停止中"}</span> : progress !== null ? <span className="animate-pulse font-semibold text-sky-500">正在创作 {progress}%</span> : <span>生成中</span>}
                     <span className="rounded-full bg-white/80 px-2 py-1 text-xs text-stone-600 shadow-sm dark:bg-stone-950/70 dark:text-stone-300">{formatDuration(durationMs)}</span>
-                    <Button
+                    {result.task?.can_cancel !== false ? <Button
                         type={stopped ? "default" : "primary"}
                         danger={!stopped}
                         disabled={stopping && !result.error}
@@ -2450,7 +2455,7 @@ function PendingVideoCard({ result, now, onCopyPrompt, onStop, onRetry, onDelete
                     >
                         {stopped ? <RotateCcw className="size-3" /> : stopping && !result.error ? <LoaderCircle className="size-3.5 animate-spin" /> : <Square className="size-3" fill="currentColor" />}
                         {stopped ? "重新生成" : null}
-                    </Button>
+                    </Button> : <span className="text-xs">任务已提交，请等待生成结果</span>}
                 </div>
                 {progress !== null && !stopped ? (
                     <div className="absolute inset-x-4 bottom-4 z-10 flex flex-col gap-1">
@@ -2853,14 +2858,21 @@ function mergeDuplicateVideoLog(existing: GenerationLog, incoming: GenerationLog
         providerWorkflowRef: preferred.providerWorkflowRef || fallback.providerWorkflowRef,
         task: preferred.task && !isLocalClientVideoTask(preferred.task) ? preferred.task : fallback.task,
         video: preferred.video || fallback.video,
-        error: preferred.error || fallback.error,
-        errorDetail: preferred.errorDetail || fallback.errorDetail,
+        error: preferred.status === "成功" || preferred.status === "生成中" ? undefined : preferred.error || fallback.error,
+        errorDetail: preferred.status === "成功" || preferred.status === "生成中" ? undefined : preferred.errorDetail || fallback.errorDetail,
         durationMs: Math.max(preferred.durationMs || 0, fallback.durationMs || 0),
         lastPolledAt: Math.max(preferred.lastPolledAt || 0, fallback.lastPolledAt || 0) || undefined,
     };
 }
 
 function shouldPreferVideoLog(next: GenerationLog, current: GenerationLog) {
+    if (next.task?.can_cancel === false && current.task?.can_cancel !== false) return true;
+    if (current.task?.can_cancel === false && next.task?.can_cancel !== false) return false;
+    if (next.task?.can_cancel === false) {
+        const nextStopping = next.status === "停止中" || next.status === "已停止";
+        const currentStopping = current.status === "停止中" || current.status === "已停止";
+        if (nextStopping !== currentStopping) return !nextStopping;
+    }
     const nextScore = videoLogScore(next);
     const currentScore = videoLogScore(current);
     if (nextScore !== currentScore) return nextScore > currentScore;
@@ -2961,7 +2973,7 @@ function backendTaskToLog(task: VideoResponse, fallbackConfig: AiConfig): Genera
 
 function mergeBackendTaskIntoLog(existing: GenerationLog | undefined, incoming: GenerationLog, task: VideoResponse): GenerationLog {
     if (!existing) return incoming;
-    if (existing.status === "停止中" || existing.status === "已停止") return existing;
+    if ((existing.status === "停止中" || existing.status === "已停止") && task.can_cancel !== false) return existing;
     const durationMs = Math.max(existing.durationMs || 0, incoming.durationMs || 0);
     const baseConfig = { ...existing.config, videoChannelId: incoming.config.videoChannelId || existing.config.videoChannelId, activeChannelId: incoming.config.activeChannelId || existing.config.activeChannelId };
     const providerWorkflowRef = existing.providerWorkflowRef || incoming.providerWorkflowRef;
@@ -3153,28 +3165,33 @@ function updateResult(results: GenerationResult[], id: string, next: Partial<Gen
 function updateResultByLogId(results: GenerationResult[], logId: string, next: Partial<GenerationResult>) {
     return results.map((item) => {
         if (item.taskLogId !== logId && item.id !== logId) return item;
-        if ((item.status === "stopping" || item.status === "stopped") && next.status !== "stopping" && next.status !== "stopped") return item;
+        if ((item.status === "stopping" || item.status === "stopped") && next.status !== "stopping" && next.status !== "stopped" && next.task?.can_cancel !== false) return item;
         return { ...item, ...next };
     });
 }
 
 function mergePendingLogResults(results: GenerationResult[], logs: GenerationLog[]) {
-    const updatedResults = results.map((result) => {
+    const activeResults = results.filter((result) => {
         const log = findMatchingPendingLogForResult(result, logs);
-        if (!log || result.status === "stopped" || (result.status === "stopping" && log.status !== "停止中")) return result;
+        return !(log?.task?.can_cancel === false && (log.status === "成功" || log.status === "失败"));
+    });
+    const updatedResults = activeResults.map((result) => {
+        const log = findMatchingPendingLogForResult(result, logs);
+        if (!log || ((result.status === "stopped" || (result.status === "stopping" && log.status !== "停止中")) && log.task?.can_cancel !== false)) return result;
         return {
             ...result,
-            status: log.status === "停止中" ? ("stopping" as const) : result.status,
+            status: log.status === "停止中" ? ("stopping" as const) : log.task?.can_cancel === false ? ("pending" as const) : result.status,
             taskLogId: log.id,
             task: log.task,
             progress: log.task?.progress ?? result.progress,
             durationMs: log.durationMs || result.durationMs,
             lastPolledAt: log.lastPolledAt || result.lastPolledAt,
+            ...(log.task?.can_cancel === false ? { error: undefined, errorDetail: undefined } : {}),
         };
     });
     const existingLogIds = new Set(updatedResults.flatMap((item) => [item.taskLogId, item.id]).filter((id): id is string => Boolean(id)));
     const existingTaskKeys = new Set(updatedResults.flatMap(videoResultIdentityKeys));
-    const pendingResults = logs.filter((log) => !existingLogIds.has(log.id) && !videoLogIdentityKeys(log).some((key) => existingTaskKeys.has(key))).map((log) => createResultFromLog(log, log.status === "停止中" ? "stopping" : "pending"));
+    const pendingResults = logs.filter((log) => (log.status === "生成中" || log.status === "停止中") && log.task && !log.video && !existingLogIds.has(log.id) && !videoLogIdentityKeys(log).some((key) => existingTaskKeys.has(key))).map((log) => createResultFromLog(log, log.status === "停止中" ? "stopping" : "pending"));
     return pendingResults.length ? sortVideoResults([...pendingResults, ...updatedResults]) : sortVideoResults(updatedResults);
 }
 
