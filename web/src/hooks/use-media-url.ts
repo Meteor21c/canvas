@@ -33,7 +33,8 @@ export function useMediaUrl(storageKey: string | undefined, fallback = "", kind:
         const resume = () => {
             if (document.visibilityState !== "hidden" && expiry() && expiry() <= Date.now() + 60_000) void refresh();
         };
-        schedule();
+        if (expiry() && expiry() <= Date.now() + 60_000) void refresh();
+        else schedule();
         window.addEventListener("focus", resume);
         document.addEventListener("visibilitychange", resume);
         return () => { active = false; clearTimeout(timer); window.removeEventListener("focus", resume); document.removeEventListener("visibilitychange", resume); };

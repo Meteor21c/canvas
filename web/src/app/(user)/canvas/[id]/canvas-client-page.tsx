@@ -15,6 +15,7 @@ import { comfyOutputStorageKey, getWorkflowTask, submitWorkflowTask, workflowMed
 import type { WorkflowRef } from "@/lib/workflow-channel";
 import { channelProtocolForConfig, defaultConfig, resolveModelForCapability, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { autoSyncToCloud, collectImageStorageKeys, deleteStoredImages, getImageBlob, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
+import { useMediaUrl } from "@/hooks/use-media-url";
 import { downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -2369,10 +2370,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [message],
     );
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((!isCanvasImageNodeType(node.type) && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
-    }, []);
+        try {
+            const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
+            if (!url) throw new Error("素材不可用，请重新打开画布后重试");
+            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
+        } catch (error) { message.error(error instanceof Error ? error.message : "下载失败，请稍后重试"); }
+    }, [message]);
 
     const disconnectNodeReference = useCallback((fromNodeId: string, toNodeId: string) => {
         setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== fromNodeId || connection.toNodeId !== toNodeId));
@@ -4921,6 +4926,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     return (
                         <FullscreenPreview
                             src={activeItemNode.metadata?.content || ""}
+                            storageKey={activeItemNode.metadata?.storageKey}
                             alt={activeItemNode.title || "图片"}
                             isVideo={activeItemNode.type === CanvasNodeType.Video}
                             isPanorama={activeItemNode.type === CanvasNodeType.Panorama}
@@ -4989,7 +4995,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 }
 
-function FullscreenPreview({ src, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+function FullscreenPreview({ src: source, storageKey, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; storageKey?: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+    const src = useMediaUrl(storageKey, source, isVideo ? "media" : "image");
     const [zoom, setZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -5527,7 +5534,7 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 }
 
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    return Promise.all(
+    const restored = await Promise.allSettled(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
@@ -5545,6 +5552,7 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
             return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
         }),
     );
+    return restored.map((result, index) => result.status === "fulfilled" ? result.value : nodes[index]);
 }
 
 function syncAssistantReferences(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[], restoreInterrupted = false, previousNode?: CanvasNodeData) {
