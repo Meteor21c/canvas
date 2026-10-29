@@ -8,7 +8,7 @@ import { useUserStore } from "../src/stores/use-user-store";
 // Execute the workbench's actual pure merge functions without mounting its UI.
 const source = readFileSync(new URL("../src/app/(user)/video/page.tsx", import.meta.url), "utf8");
 const file = ts.createSourceFile("page.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ["mergeBackendTaskIntoLog", "shouldPreferVideoLog", "mergeDuplicateVideoLog", "videoLogScore", "isLocalClientVideoTask", "hasBackendVideoTaskBinding", "isClientVideoTaskId", "videoTaskIdentityKeys", "videoLogIdentityKeys", "videoResultIdentityKeys", "normalizeVideoIdentityKey", "findMatchingPendingLogForResult", "mergePendingLogResults", "createResultFromLog", "sortVideoResults", "updateResultByLogId"];
+const names = ["mergeBackendTaskIntoLog", "shouldPreferVideoLog", "mergeDuplicateVideoLog", "videoLogScore", "isLocalClientVideoTask", "hasBackendVideoTaskBinding", "isClientVideoTaskId", "videoTaskIdentityKeys", "videoLogIdentityKeys", "videoResultIdentityKeys", "normalizeVideoIdentityKey", "findMatchingPendingLogForResult", "mergePendingLogResults", "createResultFromLog", "sortVideoResults", "updateResultByLogId", "isRecoverableBackendVideoTask", "isCompletedVideoTask", "isFailedVideoTask"];
 const functions = file.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && !!node.name && names.includes(node.name.text));
 if (functions.length !== names.length) throw new Error("video regression harness is missing a production function");
 const compiled = ts.transpileModule(functions.map(node => node.getText(file)).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
@@ -43,6 +43,7 @@ test("completed server video recovers a legacy stop record and clears its reject
     const existing = fixture();
     const task = { ...existing.task, status: "completed", progress: 100, can_cancel: false, video_url: "/studio/api/video/original/content" };
     const incoming = { ...fixture("成功", false), task, video: { id: task.id, url: task.video_url } };
+    expect(state.isRecoverableBackendVideoTask(task)).toBe(true);
     const merged = state.mergeBackendTaskIntoLog(existing, incoming, task);
     expect(merged).toMatchObject({ id: existing.id, prompt: existing.prompt, status: "成功", video: incoming.video, task });
     expect(merged.error).toBeUndefined(); expect(merged.errorDetail).toBeUndefined();
@@ -71,6 +72,7 @@ test("terminal task removes only its stale card, preserving other running tasks"
     const other = { id: "other", status: "pending", task: { id: "other-task" }, createdAt: 3000 };
     expect(state.mergePendingLogResults([stale, other], [terminal])).toEqual([other]);
     const failed = { ...terminal, status: "失败", video: undefined };
+    expect(state.isRecoverableBackendVideoTask({ ...old.task, can_cancel: false, status: "failed" })).toBe(true);
     expect(state.mergePendingLogResults([stale, other], [failed])).toEqual([other]);
 });
 

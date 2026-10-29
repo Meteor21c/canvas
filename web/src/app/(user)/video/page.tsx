@@ -3243,7 +3243,7 @@ function isTransientVideoPollError(error: unknown) {
 }
 
 function isRecoverableBackendVideoTask(task: VideoResponse) {
-    return !isCompletedVideoTask(task) && !isFailedVideoTask(task);
+    return task.can_cancel === false || (!isCompletedVideoTask(task) && !isFailedVideoTask(task));
 }
 
 function isCloudVideo(video: GeneratedVideo) {
