@@ -14,6 +14,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const isCanvasEditor = /^\/canvas\/[^/]+/.test(pathname);
     const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
     const isReady = useUserStore((state) => state.isReady);
     const wasLoggedOutRef = useRef(false);
     const error = useUserStore((state) => state.error);
@@ -27,24 +28,31 @@ export default function UserLayout({ children }: { children: ReactNode }) {
             return;
         }
         const syncCanvasAfterLogin = wasLoggedOutRef.current;
-        const token = useUserStore.getState().token;
         if (!token) return;
+        const owner = user.id;
+        let canceled = false;
+        const current = () => !canceled && useUserStore.getState().token === token && useUserStore.getState().user?.id === owner;
         wasLoggedOutRef.current = false;
         fetchUserConfig(token)
             .then(async (config) => {
+                if (!current()) return;
                 const syncEnabled = config.syncCapabilities?.userData === true;
                 const { useCanvasStore, hydrateCanvasProjects } = await import("@/app/(user)/canvas/stores/use-canvas-store");
+                if (!current()) return;
                 const canvasStore = useCanvasStore.getState();
                 canvasStore.setSyncEnabled(syncEnabled);
                 if (!canvasStore.hydrated) await hydrateCanvasProjects();
+                if (!current()) return;
                 if (syncCanvasAfterLogin && syncEnabled && canvasStore.hydrated) {
                     void canvasStore.syncWithRemote(token, true);
                 }
                 const { useAssetStore } = await import("@/stores/use-asset-store");
-                void useAssetStore.getState().hydrateAccountAssets(token, syncEnabled);
+                if (!current()) return;
+                void useAssetStore.getState().hydrateAccountAssets(token, syncEnabled).catch(() => {});
             })
             .catch(() => {});
-    }, [isReady, user]);
+        return () => { canceled = true; };
+    }, [isReady, token, user]);
 
     return (
         <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground lg:flex-row">

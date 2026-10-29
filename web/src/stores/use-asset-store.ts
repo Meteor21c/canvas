@@ -43,13 +43,22 @@ type AssetStore = {
 
 const ASSET_STORE_KEY = "meteor-canvas:v082:asset_store";
 let activeAssetSyncToken = "";
+let activeAssetSyncOwner = "";
 let accountAssetSyncEnabled = false;
 let isHydratingAccountAssets = false;
+let assetHydrationRevision = 0;
+let switchingAssetAccount = false;
 let syncTimer: number | null = null;
 
 type AssetSnapshot = { assets: Asset[] };
 
-async function resolveStoredAsset(asset: Asset): Promise<Asset> {
+function isAssetOwner(token: string, owner: string) {
+    const state = useUserStore.getState();
+    return Boolean(token && state.token === token && state.user?.id === owner);
+}
+
+async function resolveStoredAsset(asset: Asset, token = useUserStore.getState().token): Promise<Asset> {
+    if (useUserStore.getState().token !== token) throw new Error("登录状态已变化");
     if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
     if (asset.kind === "audio" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
     if (asset.kind !== "image") return asset;
@@ -60,7 +69,7 @@ async function resolveStoredAsset(asset: Asset): Promise<Asset> {
             data: { ...asset.data, dataUrl: await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl) },
         };
     if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
-    const image = await uploadImage(asset.data.dataUrl);
+    const image = await uploadImage(asset.data.dataUrl, { token });
     return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
 }
 
@@ -74,15 +83,17 @@ async function waitForMainUser() {
 const assetStorage: PersistStorage<AssetStore> = {
     getItem: async (name) => {
         await waitForMainUser();
-        const account = useUserStore.getState().user?.id;
+        const { token, user } = useUserStore.getState();
+        const account = user?.id;
         if (!account) return null;
         const value = await localForageStorage.getItem(`${name}:${account}`);
-        if (!value) return null;
+        if (!value || !isAssetOwner(token, account)) return null;
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
-        parsed.state.assets = await Promise.all(parsed.state.assets.map(resolveStoredAsset));
-        return parsed;
+        parsed.state.assets = await Promise.all(parsed.state.assets.map((asset) => resolveStoredAsset(asset, token)));
+        return isAssetOwner(token, account) ? parsed : null;
     },
     setItem: async (name, value) => {
+        if (switchingAssetAccount) return;
         const account = useUserStore.getState().user?.id;
         if (account) await localForageStorage.setItem(`${name}:${account}`, JSON.stringify(value));
     },
@@ -189,17 +200,27 @@ export const useAssetStore = create<AssetStore>()(
                     return { assets };
                 }),
             hydrateAccountAssets: async (token, syncEnabled = false) => {
-                if (!token) return;
+                const owner = useUserStore.getState().user?.id;
+                if (!owner || !isAssetOwner(token, owner)) return;
+                const revision = ++assetHydrationRevision;
+                const current = () => revision === assetHydrationRevision && isAssetOwner(token, owner);
+                if (syncTimer) window.clearTimeout(syncTimer);
+                syncTimer = null;
                 activeAssetSyncToken = token;
+                activeAssetSyncOwner = owner;
                 accountAssetSyncEnabled = syncEnabled;
                 isHydratingAccountAssets = true;
                 try {
+                    await useAssetStore.persist.rehydrate();
+                    if (!current()) return;
                     const remote = await fetchUserAssetData<AssetSnapshot>(token);
+                    if (!current()) return;
                     const remoteAssets = await Promise.all(
                         (Array.isArray(remote?.assets) ? remote.assets : []).map((asset) =>
-                            asset.kind === "image" && asset.data.storageKey?.startsWith("image:") ? resolveStoredAsset(asset) : asset,
+                            asset.kind === "image" && asset.data.storageKey?.startsWith("image:") ? resolveStoredAsset(asset, token) : asset,
                         ),
                     );
+                    if (!current()) return;
                     if (syncEnabled) {
                         set({ assets: remoteAssets });
                     } else {
@@ -209,15 +230,19 @@ export const useAssetStore = create<AssetStore>()(
                         }
                     }
                 } finally {
-                    isHydratingAccountAssets = false;
+                    if (revision === assetHydrationRevision) isHydratingAccountAssets = false;
                 }
             },
             syncAccountAssets: async (token) => {
-                if (!token || !accountAssetSyncEnabled) return;
+                if (!accountAssetSyncEnabled || token !== activeAssetSyncToken || !isAssetOwner(token, activeAssetSyncOwner)) return;
                 await syncUserAssetData(token, { assets: get().assets });
             },
             stopAccountAssetSync: () => {
+                assetHydrationRevision += 1;
                 activeAssetSyncToken = "";
+                activeAssetSyncOwner = "";
+                accountAssetSyncEnabled = false;
+                isHydratingAccountAssets = false;
                 if (syncTimer) window.clearTimeout(syncTimer);
                 syncTimer = null;
             },
@@ -282,11 +307,25 @@ export const useAssetStore = create<AssetStore>()(
 
 function scheduleAssetSync(get: () => AssetStore) {
     if (isHydratingAccountAssets || !activeAssetSyncToken || !accountAssetSyncEnabled || typeof window === "undefined") return;
+    const token = activeAssetSyncToken, owner = activeAssetSyncOwner, revision = assetHydrationRevision;
+    if (!isAssetOwner(token, owner)) return;
     if (syncTimer) window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(() => {
-        void get().syncAccountAssets(activeAssetSyncToken).catch(() => {});
+        syncTimer = null;
+        if (revision === assetHydrationRevision && isAssetOwner(token, owner)) void get().syncAccountAssets(token).catch(() => {});
     }, 600);
 }
+
+useUserStore.subscribe((state, previous) => {
+    if (state.token === previous.token && state.user?.id === previous.user?.id) return;
+    useAssetStore.getState().stopAccountAssetSync();
+    if (state.user?.id === previous.user?.id) return;
+    // Clear only the old in-memory view; each account's saved snapshot stays intact.
+    switchingAssetAccount = true;
+    try { useAssetStore.setState({ assets: [] }); }
+    finally { switchingAssetAccount = false; }
+    if (state.token && state.user) void useAssetStore.persist.rehydrate();
+});
 
 export function mergeAssets(remoteAssets: Asset[], localAssets: Asset[]) {
     const records = new Map<string, Asset>();
