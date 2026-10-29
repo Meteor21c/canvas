@@ -322,6 +322,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const referenceUploadTargetRef = useRef<{ nodeId: string; allowedKinds?: CanvasResourceKind[] } | null>(null);
     const canvasUploadBusyRef = useRef(false);
     const referenceUploadBusyRef = useRef(false);
+    const referenceInsertBusyRef = useRef(false);
+    const uploadEpochRef = useRef(0);
+    useEffect(() => () => { uploadEpochRef.current += 1; }, [projectId]);
+    const captureUploadOwner = useCallback(() => {
+        const owner = useUserStore.getState();
+        const epoch = uploadEpochRef.current;
+        return { token: owner.token, current: () => uploadEpochRef.current === epoch && useUserStore.getState().token === owner.token && useUserStore.getState().user?.id === owner.user?.id };
+    }, []);
     const assetInsertPositionRef = useRef<Position | null>(null);
     const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -1873,11 +1881,13 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         return id;
     }, []);
 
-    const createImageFileNode = useCallback(async (file: File, position: Position, choosePanoramaImport = false) => {
+    const createImageFileNode = useCallback(async (file: File, position: Position, choosePanoramaImport = false, owner = captureUploadOwner()) => {
         const hideLoading = message.loading("正在上传图片...", 0);
         try {
             assertReferenceFileSize(file);
-            const image = await uploadImage(file);
+            if (!owner.current()) return;
+            const image = await uploadImage(file, { token: owner.token });
+            if (!owner.current()) return;
             if (choosePanoramaImport && image.width === image.height * 2) {
                 setPendingPanoramaImport({ image, title: file.name, position });
                 return;
@@ -1889,18 +1899,20 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         } finally {
             hideLoading();
         }
-    }, [appendImportedImageNode, message]);
+    }, [appendImportedImageNode, captureUploadOwner, message]);
 
     const finishPanoramaImport = useCallback((type: CanvasNodeType.Image | CanvasNodeType.Panorama) => {
         if (!pendingPanoramaImport) return;
         setPendingPanoramaImport(null);
         appendImportedImageNode(pendingPanoramaImport.image, pendingPanoramaImport.title, pendingPanoramaImport.position, type);
     }, [appendImportedImageNode, pendingPanoramaImport]);
-    const createVideoFileNode = useCallback(async (file: File, position: Position) => {
+    const createVideoFileNode = useCallback(async (file: File, position: Position, owner = captureUploadOwner()) => {
         const hideLoading = message.loading("正在上传视频...", 0);
         try {
             assertReferenceFileSize(file);
-            const video = await uploadMediaFile(file, "video");
+            if (!owner.current()) return;
+            const video = await uploadMediaFile(file, "video", undefined, owner.token);
+            if (!owner.current()) return;
             const node = buildImportedVideoNode(video, file.name, position);
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
@@ -1913,13 +1925,15 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         } finally {
             hideLoading();
         }
-    }, [message]);
+    }, [captureUploadOwner, message]);
 
-    const createAudioFileNode = useCallback(async (file: File, position: Position) => {
+    const createAudioFileNode = useCallback(async (file: File, position: Position, owner = captureUploadOwner()) => {
         const hideLoading = message.loading("正在上传音频...", 0);
         try {
             assertReferenceFileSize(file);
-            const audio = await uploadMediaFile(file, "audio");
+            if (!owner.current()) return;
+            const audio = await uploadMediaFile(file, "audio", undefined, owner.token);
+            if (!owner.current()) return;
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
             const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             setNodes((prev) => [
@@ -1943,22 +1957,24 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         } finally {
             hideLoading();
         }
-    }, [message]);
+    }, [captureUploadOwner, message]);
 
     const importCanvasFiles = useCallback(async (inputFiles: File[], position: Position) => {
         if (canvasUploadBusyRef.current) return message.info("请等待当前素材上传完成");
         if (inputFiles.length > 20) return message.warning("每批最多上传20个素材，请分批选择");
         const files = inputFiles.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/") || isAudioFile(file));
         if (files.length !== inputFiles.length) message.warning("已跳过不支持的文件，请选择图片、视频或音频");
+        const owner = captureUploadOwner();
         canvasUploadBusyRef.current = true;
         const imported: string[] = [];
         try {
             for (const [index, file] of files.entries()) {
-                const point = { x: position.x + (index % 4) * 360, y: position.y + Math.floor(index / 4) * 300 };
-                const id = await (isAudioFile(file) ? createAudioFileNode(file, point) : file.type.startsWith("video/") ? createVideoFileNode(file, point) : createImageFileNode(file, point, files.length === 1));
+                if (!owner.current()) break;
+                const point = { x: position.x + (index % 4) * 720, y: position.y + Math.floor(index / 4) * 720 };
+                const id = await (isAudioFile(file) ? createAudioFileNode(file, point, owner) : file.type.startsWith("video/") ? createVideoFileNode(file, point, owner) : createImageFileNode(file, point, files.length === 1, owner));
                 if (id) imported.push(id);
             }
-            if (imported.length > 1) {
+            if (owner.current() && imported.length > 1) {
                 setSelectedNodeIds(new Set(imported));
                 setDialogNodeId(null);
                 message.success(`已上传${imported.length}个素材`);
@@ -1966,7 +1982,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         } finally {
             canvasUploadBusyRef.current = false;
         }
-    }, [createAudioFileNode, createImageFileNode, createVideoFileNode, message]);
+    }, [captureUploadOwner, createAudioFileNode, createImageFileNode, createVideoFileNode, message]);
 
     const extractingAudioRef = useRef(new Set<string>());
 
@@ -2413,7 +2429,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== fromNodeId || connection.toNodeId !== toNodeId));
     }, []);
 
-    const referenceImageCount = useCallback((nodeId: string) => connectionsRef.current.filter((connection) => connection.toNodeId === nodeId && isCanvasImageNodeType(nodesRef.current.find((node) => node.id === connection.fromNodeId)?.type)).length, []);
+    const referenceImageCount = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        const ownImage = isCanvasImageNodeType(node?.type) && Boolean(node?.metadata?.content) && (isPanoramaNodeType(node?.type) || effectiveConfig.nodeRegenerateBehavior !== "overwrite");
+        return buildNodeGenerationInputs(nodeId, nodesRef.current, connectionsRef.current).filter((input) => input.type === "image").length + Number(ownImage);
+    }, [effectiveConfig.nodeRegenerateBehavior]);
 
     const startNodeReferenceSelection = useCallback((nodeId: string, allowedKinds?: CanvasResourceKind[]) => {
         setReferencePickerKinds(allowedKinds);
@@ -2438,7 +2458,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const source = nodesRef.current.find((node) => node.id === fromNodeId);
         if (!source || !isCanvasReferenceNode(source) || (referencePickerKinds && !referencePickerKinds.includes(canvasReferenceKind(source)!))) return;
         const target = nodesRef.current.find((node) => node.id === referencePickerNodeId);
-        if (isCanvasImageNodeType(target?.type) && isCanvasImageNodeType(source.type) && referenceImageCount(referencePickerNodeId) >= 4) return message.warning("参考图片最多4张");
+        if (isImageReferenceTarget(target) && isCanvasImageNodeType(source.type) && referenceImageCount(referencePickerNodeId) >= 4) return message.warning("参考图片最多4张");
         const next = [...connectionsRef.current, { id: nanoid(), fromNodeId, toNodeId: referencePickerNodeId }];
         connectionsRef.current = next;
         setConnections(next);
@@ -4336,8 +4356,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage, position?: Position, nodeId?: string) => {
+            const owner = captureUploadOwner();
             const storedImage = { url: image.dataUrl, storageKey: image.storageKey || "", width: 1, height: 1, bytes: 0, mimeType: "image/png" };
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
+            if (!owner.current()) return;
             const config = fitNodeSize(meta.width, meta.height);
             const center = position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = nodeId || `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -4356,7 +4378,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSelectedConnectionId(null);
             setDialogNodeId(id);
         },
-        [screenToCanvas, size.height, size.width],
+        [captureUploadOwner, screenToCanvas, size.height, size.width],
     );
 
     const insertAssetAtRef = useRef(insertAssetAt);
@@ -4400,21 +4422,27 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         });
     }, [getCanvasCenter, message, projectId, projectLoaded, updateProject]);
     const insertReferenceAsset = useCallback(async (payload: InsertAssetPayload, target: { nodeId: string; allowedKinds?: CanvasResourceKind[] }) => {
+        if (referenceInsertBusyRef.current) throw new Error("正在添加参考素材，请稍候");
+        const owner = captureUploadOwner();
         const node = nodesRef.current.find((item) => item.id === target.nodeId);
         if (!node) throw new Error("原节点已移除，请重新选择");
         if (target.allowedKinds && !target.allowedKinds.includes(payload.kind)) throw new Error("当前模型不支持这种参考素材");
-        if (isCanvasImageNodeType(node.type) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
+        if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
+        referenceInsertBusyRef.current = true;
+        try {
         const id = `reference-${nanoid()}`;
         const index = connectionsRef.current.filter((connection) => connection.toNodeId === node.id).length;
-        await insertAssetAtRef.current(payload, { x: node.position.x - 220 - Math.floor(index / 3) * 360, y: node.position.y + (index % 3) * 300 }, id);
-        if (!nodesRef.current.some((item) => item.id === node.id)) return;
+        await insertAssetAtRef.current(payload, { x: node.position.x - 360 - Math.floor(index / 3) * 720, y: node.position.y + (index % 3) * 720 }, id);
+        if (!owner.current() || !nodesRef.current.some((item) => item.id === node.id)) return;
+        if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
         const next = [...connectionsRef.current, { id: nanoid(), fromNodeId: id, toNodeId: node.id }];
         connectionsRef.current = next;
         setConnections(next);
         setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
         setDialogNodeId(node.id);
-    }, [referenceImageCount]);
+        } finally { referenceInsertBusyRef.current = false; }
+    }, [captureUploadOwner, referenceImageCount]);
 
     const handleAddReference = useCallback((nodeId: string, source: "upload" | "assets", allowedKinds?: CanvasResourceKind[]) => {
         if (source === "assets") {
@@ -4439,29 +4467,29 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (referenceUploadBusyRef.current) return message.info("请等待参考素材上传完成");
         if (files.length > 20) return message.warning("每批最多上传20个素材");
         const node = nodesRef.current.find((item) => item.id === target.nodeId);
-        if (isCanvasImageNodeType(node?.type) && files.filter((file) => file.type.startsWith("image/")).length + referenceImageCount(target.nodeId) > 4) return message.warning("参考图片最多4张，请减少选择数量");
-        const owner = useUserStore.getState().user?.id;
+        if (isImageReferenceTarget(node) && files.filter((file) => file.type.startsWith("image/")).length + referenceImageCount(target.nodeId) > 4) return message.warning("参考图片最多4张，请减少选择数量");
+        const owner = captureUploadOwner();
         referenceUploadBusyRef.current = true;
         const hideLoading = message.loading("正在添加参考素材...", 0);
         let succeeded = 0;
         try {
             for (const file of files) {
-                if (useUserStore.getState().user?.id !== owner) break;
+                if (!owner.current()) break;
                 try {
                     assertReferenceFileSize(file);
                     const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "audio";
                     if (target.allowedKinds && !target.allowedKinds.includes(kind)) throw new Error("当前模型不支持这种参考素材");
                     let payload: InsertAssetPayload;
                     if (kind === "image") {
-                        const image = await uploadImage(file);
+                        const image = await uploadImage(file, { token: owner.token });
                         payload = { kind, title: file.name, dataUrl: image.url, storageKey: image.storageKey };
                     } else {
-                        const media = await uploadMediaFile(file, kind);
+                        const media = await uploadMediaFile(file, kind, undefined, owner.token);
                         payload = kind === "video"
                             ? { kind, title: file.name, url: media.url, storageKey: media.storageKey, width: media.width, height: media.height, bytes: media.bytes, mimeType: media.mimeType }
                             : { kind, title: file.name, url: media.url, storageKey: media.storageKey, bytes: media.bytes, mimeType: media.mimeType, durationMs: media.durationMs };
                     }
-                    if (useUserStore.getState().user?.id !== owner) break;
+                    if (!owner.current()) break;
                     await insertReferenceAsset(payload, target);
                     succeeded++;
                 } catch (error) {
@@ -4473,7 +4501,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             referenceUploadBusyRef.current = false;
             hideLoading();
         }
-    }, [insertReferenceAsset, message, referenceImageCount]);
+    }, [captureUploadOwner, insertReferenceAsset, message, referenceImageCount]);
 
     const handleAssetInsert = useCallback(async (payload: InsertAssetPayload) => {
         try {
@@ -6349,4 +6377,8 @@ function buildAngleLabel(params: CanvasImageAngleParams) {
 
 function buildAnglePrompt(params: CanvasImageAngleParams) {
     return `基于参考图重新生成同一主体的新视角，保持主体、颜色、材质和画面风格一致，不要只做透视变形。${buildAngleLabel(params)}。`;
+}
+
+function isImageReferenceTarget(node?: CanvasNodeData) {
+    return Boolean(node && (isCanvasImageNodeType(node.type) || (node.type === CanvasNodeType.Config && (node.metadata?.generationMode || "image") === "image")));
 }
