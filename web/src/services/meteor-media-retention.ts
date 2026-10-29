@@ -5,11 +5,12 @@ import { useUserStore } from "@/stores/use-user-store";
 
 const cache = localforage.createInstance({ name: "meteor-canvas-v082", storeName: "media" });
 const legacy = localforage.createInstance({ name: "meteor-canvas-pilot", storeName: "media" });
-const TTL = 24 * 60 * 60 * 1000;
+const LEGACY_TTL = 24 * 60 * 60 * 1000;
+const TTL = 7 * LEGACY_TTL;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_OWNER_BYTES = 256 * 1024 * 1024;
 const MAX_FILES = 256;
-type Entry = { blob: Blob; expires: number; kind: string };
+type Entry = { blob: Blob; expires: number; kind: string; createdAt?: number };
 const urls = new Map<string, { url: string; expires: number }>();
 let pending: Promise<unknown> = Promise.resolve();
 
@@ -26,13 +27,18 @@ function revoke(key: string) {
     urls.delete(key);
 }
 
+function retained(entry: Entry): Entry {
+    const createdAt = entry.createdAt ?? entry.expires - LEGACY_TTL;
+    return { ...entry, createdAt, expires: createdAt + TTL };
+}
+
 export function clearMeteorMediaSession() {
     for (const key of urls.keys()) revoke(key);
 }
 
 export async function cleanupMeteorMedia() {
     const expired: string[] = [];
-    await cache.iterate<Entry, void>((entry, key) => { if (!entry?.expires || entry.expires <= Date.now()) expired.push(key); });
+    await cache.iterate<Entry, void>((entry, key) => { if (!entry?.expires || retained(entry).expires <= Date.now()) expired.push(key); });
     for (const key of expired) { await cache.removeItem(key); revoke(key); }
     for (const [key, row] of urls) if (row.expires <= Date.now()) revoke(key);
 }
@@ -50,9 +56,9 @@ export function meteorObjectUrl(key: string, blob: Blob) {
 async function checkQuota(account: string, target: string, blob: Blob) {
     let bytes = 0, count = 0;
     await cache.iterate<Entry, void>((entry, id) => {
-        if (id.startsWith(`${account}:`) && id !== target && entry.expires > Date.now()) { bytes += entry.blob.size; count++; }
+        if (id.startsWith(`${account}:`) && id !== target && retained(entry).expires > Date.now()) { bytes += entry.blob.size; count++; }
     });
-    if (bytes + blob.size > MAX_OWNER_BYTES || count >= MAX_FILES) throw new Error("浏览器媒体缓存已达到 256 MiB / 256 个上限，请先导出并删除不用的素材，或等待 24 小时清理");
+    if (bytes + blob.size > MAX_OWNER_BYTES || count >= MAX_FILES) throw new Error("浏览器媒体缓存已达到 256 MiB / 256 个上限，请先导出并删除不用的素材，或等待 7 天到期清理");
 }
 
 export function createMeteorMediaStore(kind: "image" | "media") {
@@ -66,7 +72,8 @@ export function createMeteorMediaStore(kind: "image" | "media") {
                 const target = scoped(key, account);
                 await checkQuota(account, target, blob);
                 checkAccount(account);
-                await cache.setItem<Entry>(target, { blob, expires: Date.now() + TTL, kind });
+                const createdAt = Date.now();
+                await cache.setItem<Entry>(target, { blob, createdAt, expires: createdAt + TTL, kind });
                 revoke(target);
             });
             pending = operation;
@@ -75,15 +82,16 @@ export function createMeteorMediaStore(kind: "image" | "media") {
         },
         async getItem<T = Blob>(key: string): Promise<T | null> {
             const account = owner(), target = scoped(key, account);
-            let entry = await cache.getItem<Entry>(target);
+            const current = await cache.getItem<Entry>(target);
+            let entry = current ? retained(current) : null;
             checkAccount(account);
-            // Read the previous trial's account-scoped cache without extending retention or deleting it.
+            // Recover the previous trial's 24-hour entries within their original seven-day window.
             if (!entry && kind === "image") {
                 const previousOwner = account.replace(/^meteor_user_/, "");
-                const previous = await legacy.getItem<{ blob: Blob; expires: number }>(`${previousOwner}:${key}`);
+                const previous = await legacy.getItem<Entry>(`${previousOwner}:${key}`);
                 checkAccount(account);
-                if (previous?.blob instanceof Blob && previous.expires > Date.now() && previous.blob.size <= MAX_FILE_BYTES) {
-                    entry = { ...previous, kind };
+                if (previous?.blob instanceof Blob && retained(previous).expires > Date.now() && previous.blob.size <= MAX_FILE_BYTES) {
+                    entry = { ...retained(previous), kind };
                     const copy = pending.catch(() => undefined).then(async () => {
                         checkAccount(account);
                         await cleanupMeteorMedia();

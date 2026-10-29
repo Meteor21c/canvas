@@ -56,7 +56,6 @@ export type StorageConfig = {
 
 const store = createMeteorMediaStore("image");
 const objectUrls = new Map<string, string>();
-const serverUrls = new Map<string, string>();
 export const USER_STORAGE_PROVIDER_KEY = "meteor-canvas:v082:user_storage_provider";
 export const USER_WEBDAV_STORAGE_PROVIDER_KEY = "meteor-canvas:v082:user_webdav_storage_provider";
 let storageConfigPromise: Promise<StorageConfig> | null = null;
@@ -225,7 +224,6 @@ export async function uploadRemoteImageToServer(url: string, filename: string): 
     const payload = (await uploadResponse.json().catch(() => null)) as { code?: number; msg?: string; data?: UploadedImage } | null;
     if (!uploadResponse.ok || payload?.code !== 0 || !payload.data) throw new Error(payload?.msg || "服务端图片上传失败");
     const meta = await readImageMeta(payload.data.url);
-    if (payload.data.storageKey?.startsWith("server:")) serverUrls.set(payload.data.storageKey.slice("server:".length), payload.data.url);
     return { ...payload.data, width: payload.data.width || meta.width, height: payload.data.height || meta.height, mimeType: payload.data.mimeType || blob.type || "image/png", bytes: payload.data.bytes || blob.size };
 }
 
@@ -246,11 +244,8 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     }
     if (storageKey.startsWith("server:")) {
         const id = storageKey.slice("server:".length);
-        if (fallback && !fallback.startsWith("blob:") && !fallback.includes("direct=1")) return fallback;
         const localUrl = await resolveLocalImageUrl(storageKey).catch(() => "");
         if (localUrl) return localUrl;
-        const cachedUrl = serverUrls.get(id);
-        if (cachedUrl) return cachedUrl;
         const { getStorageObjectInfo } = await import("@/services/api/storage");
         const info = await getStorageObjectInfo(id).catch(() => null);
         if (!info) return fallback;
@@ -265,7 +260,6 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
             }
         }
         const url = info.publicUrl || `/studio/api/files/${encodeURIComponent(id)}/content`;
-        serverUrls.set(id, url);
         return url;
     }
     return await resolveLocalImageUrl(storageKey) || (fallback.startsWith("blob:") ? "" : fallback);
@@ -315,7 +309,6 @@ async function maybeUploadImageToServer(blob: Blob, tokenOverride?: string): Pro
         throw new Error(payload?.msg || "服务端图片上传失败");
     }
     const meta = await readImageMeta(payload.data.url);
-    if (payload.data.storageKey?.startsWith("server:")) serverUrls.set(payload.data.storageKey.slice("server:".length), payload.data.url);
     return { ...payload.data, width: payload.data.width || meta.width, height: payload.data.height || meta.height, mimeType: payload.data.mimeType || blob.type || "image/png", bytes: payload.data.bytes || blob.size };
 }
 
@@ -330,7 +323,6 @@ async function cacheAnonymousImage(uploaded: UploadedImage, blob: Blob) {
     await store.setItem(uploaded.storageKey, blob);
     const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(uploaded.storageKey, url);
-    if (uploaded.storageKey.startsWith("server:") && uploaded.url && !uploaded.url.includes("direct=1")) serverUrls.set(uploaded.storageKey.slice("server:".length), uploaded.url);
     const meta = await readImageMeta(url);
     return { ...uploaded, url, width: uploaded.width || meta.width, height: uploaded.height || meta.height, mimeType: uploaded.mimeType || blob.type || meta.mimeType, bytes: uploaded.bytes || blob.size };
 }
@@ -379,7 +371,7 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
         resolvedUrl,
         serverObjectId && !directGuestObject ? `/studio/api/files/${encodeURIComponent(serverObjectId)}/content` : "",
     ].filter((url, index, list): url is string => Boolean(url) && list.indexOf(url) === index);
-    if (!urls.length) throw new Error("参考图缓存已过期（保留 24 小时），请重新上传");
+    if (!urls.length) throw new Error("参考图已超过 7 天保留期，或不在当前浏览器中，请重新上传");
     let lastError = "";
     for (const url of urls) {
         if (url.startsWith("data:")) return url;
@@ -553,7 +545,6 @@ async function deleteServerImage(storageKey: string) {
     const id = storageKey.slice("server:".length);
     if (!id) return;
     const token = useUserStore.getState().token;
-    serverUrls.delete(id);
     const provider = loadUserStorageProvider();
     if (storageKey.startsWith("server:webdav:") && provider?.type !== "webdav") return;
     if (provider?.type === "webdav") {
