@@ -94,7 +94,7 @@ function CanvasPreview() {
     return (
         <div
             aria-label="创作画布预览：文字连接参考画面与视频分镜"
-            className="relative isolate aspect-[1.8] min-h-64 overflow-hidden rounded-[1.4rem] border border-stone-200/80 bg-[#f3f3ef] bg-[radial-gradient(#b4b8b9_0.65px,transparent_0.65px)] [background-size:16px_16px] dark:border-stone-800 dark:bg-[#1b1e1e] dark:bg-[radial-gradient(#3b4141_0.65px,transparent_0.65px)]"
+            className="relative isolate aspect-[1.8] min-h-64 w-full min-w-0 overflow-hidden rounded-[1.4rem] border border-stone-200/80 bg-[#f3f3ef] bg-[radial-gradient(#b4b8b9_0.65px,transparent_0.65px)] [background-size:16px_16px] dark:border-stone-800 dark:bg-[#1b1e1e] dark:bg-[radial-gradient(#3b4141_0.65px,transparent_0.65px)]"
         >
             <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-2.5 py-1 text-[9px] tracking-wide text-stone-400 backdrop-blur dark:border-stone-700 dark:bg-stone-900/80 dark:text-stone-500">
                 <span className="size-1.5 rounded-full bg-emerald-500/70" />
