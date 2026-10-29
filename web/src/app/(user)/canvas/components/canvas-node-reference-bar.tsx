@@ -1,14 +1,16 @@
 "use client";
 
-import { FileText, Image as ImageIcon, Music2, Plus, Video, X } from "lucide-react";
-import { Popover } from "antd";
+import { FileText, FolderOpen, Image as ImageIcon, MousePointer2, Music2, Plus, Upload, Video, X } from "lucide-react";
+import { Dropdown, Popover } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { buildAllCanvasResourceReferences, type CanvasResourceReference } from "../utils/canvas-resource-references";
 import type { CanvasNodeData } from "../types";
 
-export function CanvasNodeReferenceBar({ nodeId, connectedNodes, onDisconnect, onStartSelection }: { nodeId: string; connectedNodes: CanvasNodeData[]; onDisconnect?: (fromNodeId: string, toNodeId: string) => void; onStartSelection?: (nodeId: string) => void }) {
+export type ReferenceAddSource = "upload" | "assets";
+
+export function CanvasNodeReferenceBar({ nodeId, connectedNodes, onDisconnect, onStartSelection, onAddReference, canUpload = true }: { nodeId: string; connectedNodes: CanvasNodeData[]; onDisconnect?: (fromNodeId: string, toNodeId: string) => void; onStartSelection?: (nodeId: string) => void; onAddReference?: (nodeId: string, source: ReferenceAddSource) => void; canUpload?: boolean }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const references = buildAllCanvasResourceReferences(connectedNodes);
     return (
@@ -16,9 +18,15 @@ export function CanvasNodeReferenceBar({ nodeId, connectedNodes, onDisconnect, o
             <div className="mb-1.5 text-[11px] font-medium" style={{ color: theme.node.muted }}>参考内容</div>
             <div className="thin-scrollbar flex min-h-12 gap-2 overflow-x-auto pb-1">
                 {references.map((reference) => <ReferenceItem key={reference.id} reference={reference} onRemove={() => onDisconnect?.(reference.nodeId, nodeId)} />)}
-                <button type="button" className="grid size-12 shrink-0 place-items-center rounded-xl border bg-transparent transition hover:opacity-70" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }} title="从画布选择参考节点" onClick={() => onStartSelection?.(nodeId)}>
-                    <Plus className="size-4" />
-                </button>
+                <Dropdown trigger={["click"]} menu={{ items: [
+                    { key: "upload", label: "本地上传", icon: <Upload className="size-4" />, disabled: !canUpload, onClick: () => onAddReference?.(nodeId, "upload") },
+                    { key: "assets", label: "我的素材", icon: <FolderOpen className="size-4" />, onClick: () => onAddReference?.(nodeId, "assets") },
+                    { key: "canvas", label: "从画布选择", icon: <MousePointer2 className="size-4" />, onClick: () => onStartSelection?.(nodeId) },
+                ] }}>
+                    <button type="button" className="grid size-12 shrink-0 place-items-center rounded-xl border bg-transparent transition hover:opacity-70" style={{ borderColor: theme.toolbar.border, color: theme.node.muted }} title="添加参考素材" aria-label="添加参考素材">
+                        <Plus className="size-4" />
+                    </button>
+                </Dropdown>
             </div>
         </div>
     );

@@ -317,6 +317,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
+    const referenceInputRef = useRef<HTMLInputElement>(null);
+    const referenceUploadTargetRef = useRef<{ nodeId: string; allowedKinds?: CanvasResourceKind[] } | null>(null);
+    const canvasUploadBusyRef = useRef(false);
+    const referenceUploadBusyRef = useRef(false);
     const assetInsertPositionRef = useRef<Position | null>(null);
     const draggedAssetPayloadRef = useRef<InsertAssetPayload | null>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -395,6 +399,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTab, setAssetPickerTab] = useState<AssetPickerTab>("my-assets");
+    const [referenceAssetTarget, setReferenceAssetTarget] = useState<{ nodeId: string; allowedKinds?: CanvasResourceKind[] } | null>(null);
     const [pendingPanoramaImport, setPendingPanoramaImport] = useState<PendingPanoramaImport | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
@@ -1864,6 +1869,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         setDialogNodeId(id);
+        return id;
     }, []);
 
     const createImageFileNode = useCallback(async (file: File, position: Position, choosePanoramaImport = false) => {
@@ -1875,7 +1881,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setPendingPanoramaImport({ image, title: file.name, position });
                 return;
             }
-            appendImportedImageNode(image, file.name, position, CanvasNodeType.Image);
+            return appendImportedImageNode(image, file.name, position, CanvasNodeType.Image);
         } catch (error) {
             console.error("Upload image node failed:", error);
             message.error(error instanceof Error ? error.message : "图片上传失败");
@@ -1899,6 +1905,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(node.id);
+            return node.id;
         } catch (error) {
             console.error("Upload video node failed:", error);
             message.error(error instanceof Error ? error.message : "视频上传失败");
@@ -1936,6 +1943,29 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             hideLoading();
         }
     }, [message]);
+
+    const importCanvasFiles = useCallback(async (inputFiles: File[], position: Position) => {
+        if (canvasUploadBusyRef.current) return message.info("请等待当前素材上传完成");
+        if (inputFiles.length > 20) return message.warning("每批最多上传20个素材，请分批选择");
+        const files = inputFiles.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/") || isAudioFile(file));
+        if (files.length !== inputFiles.length) message.warning("已跳过不支持的文件，请选择图片、视频或音频");
+        canvasUploadBusyRef.current = true;
+        const imported: string[] = [];
+        try {
+            for (const [index, file] of files.entries()) {
+                const point = { x: position.x + (index % 4) * 360, y: position.y + Math.floor(index / 4) * 300 };
+                const id = await (isAudioFile(file) ? createAudioFileNode(file, point) : file.type.startsWith("video/") ? createVideoFileNode(file, point) : createImageFileNode(file, point, files.length === 1));
+                if (id) imported.push(id);
+            }
+            if (imported.length > 1) {
+                setSelectedNodeIds(new Set(imported));
+                setDialogNodeId(null);
+                message.success(`已上传${imported.length}个素材`);
+            }
+        } finally {
+            canvasUploadBusyRef.current = false;
+        }
+    }, [createAudioFileNode, createImageFileNode, createVideoFileNode, message]);
 
     const extractingAudioRef = useRef(new Set<string>());
 
@@ -2378,6 +2408,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== fromNodeId || connection.toNodeId !== toNodeId));
     }, []);
 
+    const referenceImageCount = useCallback((nodeId: string) => connectionsRef.current.filter((connection) => connection.toNodeId === nodeId && isCanvasImageNodeType(nodesRef.current.find((node) => node.id === connection.fromNodeId)?.type)).length, []);
+
     const startNodeReferenceSelection = useCallback((nodeId: string, allowedKinds?: CanvasResourceKind[]) => {
         setReferencePickerKinds(allowedKinds);
         setReferencePickerNodeId(nodeId);
@@ -2400,8 +2432,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (!referencePickerNodeId || referenceConnectedNodeIds.has(fromNodeId)) return;
         const source = nodesRef.current.find((node) => node.id === fromNodeId);
         if (!source || !isCanvasReferenceNode(source) || (referencePickerKinds && !referencePickerKinds.includes(canvasReferenceKind(source)!))) return;
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId, toNodeId: referencePickerNodeId }]);
-    }, [referenceConnectedNodeIds, referencePickerNodeId, referencePickerKinds]);
+        const target = nodesRef.current.find((node) => node.id === referencePickerNodeId);
+        if (isCanvasImageNodeType(target?.type) && isCanvasImageNodeType(source.type) && referenceImageCount(referencePickerNodeId) >= 4) return message.warning("参考图片最多4张");
+        const next = [...connectionsRef.current, { id: nanoid(), fromNodeId, toNodeId: referencePickerNodeId }];
+        connectionsRef.current = next;
+        setConnections(next);
+    }, [message, referenceConnectedNodeIds, referenceImageCount, referencePickerNodeId, referencePickerKinds]);
 
     useEffect(() => {
         if (!referencePickerNodeId) return;
@@ -2855,13 +2891,25 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
         uploadTargetRef.current = { nodeId, position };
-        imageInputRef.current?.click();
+        if (imageInputRef.current) {
+            imageInputRef.current.multiple = !nodeId;
+            imageInputRef.current.value = "";
+            imageInputRef.current.click();
+        }
     }, []);
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files || []);
             const target = uploadTargetRef.current;
+            uploadTargetRef.current = null;
+            event.target.value = "";
+            if (!target?.nodeId) {
+                const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                if (files.length) await importCanvasFiles(files, position);
+                return;
+            }
+            const file = files[0];
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
             try {
                 assertReferenceFileSize(file);
@@ -2960,15 +3008,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 } finally {
                     hideLoading();
                 }
-            } else {
-                const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position, true));
             }
-
-            uploadTargetRef.current = null;
-            event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [importCanvasFiles, message, screenToCanvas, size.height, size.width],
     );
 
     function insertAssetAt(payload: InsertAssetPayload, position?: Position, nodeId?: string) {
@@ -3005,12 +3047,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 void insertAssetAt(payload, screenToCanvas(event.clientX, event.clientY));
                 return;
             }
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
-            if (!file) return;
-            const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos, true));
+            const files = Array.from(event.dataTransfer.files);
+            if (!files.length) return;
+            void importCanvasFiles(files, screenToCanvas(event.clientX, event.clientY));
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, insertAssetAt, screenToCanvas],
+        [importCanvasFiles, insertAssetAt, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -4353,15 +4394,93 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             message.error(error instanceof Error ? error.message : "首页素材插入失败");
         });
     }, [getCanvasCenter, message, projectId, projectLoaded, updateProject]);
-    const handleAssetInsert = useCallback(
-        (payload: InsertAssetPayload) => {
-            const position = assetInsertPositionRef.current || undefined;
+    const insertReferenceAsset = useCallback(async (payload: InsertAssetPayload, target: { nodeId: string; allowedKinds?: CanvasResourceKind[] }) => {
+        const node = nodesRef.current.find((item) => item.id === target.nodeId);
+        if (!node) throw new Error("原节点已移除，请重新选择");
+        if (target.allowedKinds && !target.allowedKinds.includes(payload.kind)) throw new Error("当前模型不支持这种参考素材");
+        if (isCanvasImageNodeType(node.type) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
+        const id = `reference-${nanoid()}`;
+        const index = connectionsRef.current.filter((connection) => connection.toNodeId === node.id).length;
+        await insertAssetAtRef.current(payload, { x: node.position.x - 220 - Math.floor(index / 3) * 360, y: node.position.y + (index % 3) * 300 }, id);
+        if (!nodesRef.current.some((item) => item.id === node.id)) return;
+        const next = [...connectionsRef.current, { id: nanoid(), fromNodeId: id, toNodeId: node.id }];
+        connectionsRef.current = next;
+        setConnections(next);
+        setSelectedNodeIds(new Set([node.id]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(node.id);
+    }, [referenceImageCount]);
+
+    const handleAddReference = useCallback((nodeId: string, source: "upload" | "assets", allowedKinds?: CanvasResourceKind[]) => {
+        if (source === "assets") {
+            setReferenceAssetTarget({ nodeId, allowedKinds });
             assetInsertPositionRef.current = null;
-            void insertAssetAtRef.current(payload, position);
+            setAssetPickerTab("my-assets");
+            setAssetPickerOpen(true);
+        } else if (referenceInputRef.current) {
+            referenceUploadTargetRef.current = { nodeId, allowedKinds };
+            referenceInputRef.current.accept = (allowedKinds || ["image", "video", "audio"]).filter((kind) => kind !== "text").map((kind) => kind === "audio" ? "audio/mpeg,audio/wav,.mp3,.wav" : `${kind}/*`).join(",");
+            referenceInputRef.current.value = "";
+            referenceInputRef.current.click();
+        }
+    }, []);
+
+    const handleReferenceInputChange = useCallback(async (event: ReactChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []);
+        const target = referenceUploadTargetRef.current;
+        referenceUploadTargetRef.current = null;
+        event.target.value = "";
+        if (!target || !files.length) return;
+        if (referenceUploadBusyRef.current) return message.info("请等待参考素材上传完成");
+        if (files.length > 20) return message.warning("每批最多上传20个素材");
+        const node = nodesRef.current.find((item) => item.id === target.nodeId);
+        if (isCanvasImageNodeType(node?.type) && files.filter((file) => file.type.startsWith("image/")).length + referenceImageCount(target.nodeId) > 4) return message.warning("参考图片最多4张，请减少选择数量");
+        const owner = useUserStore.getState().user?.id;
+        referenceUploadBusyRef.current = true;
+        const hideLoading = message.loading("正在添加参考素材...", 0);
+        let succeeded = 0;
+        try {
+            for (const file of files) {
+                if (useUserStore.getState().user?.id !== owner) break;
+                try {
+                    assertReferenceFileSize(file);
+                    const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "audio";
+                    if (target.allowedKinds && !target.allowedKinds.includes(kind)) throw new Error("当前模型不支持这种参考素材");
+                    let payload: InsertAssetPayload;
+                    if (kind === "image") {
+                        const image = await uploadImage(file);
+                        payload = { kind, title: file.name, dataUrl: image.url, storageKey: image.storageKey };
+                    } else {
+                        const media = await uploadMediaFile(file, kind);
+                        payload = kind === "video"
+                            ? { kind, title: file.name, url: media.url, storageKey: media.storageKey, width: media.width, height: media.height, bytes: media.bytes, mimeType: media.mimeType }
+                            : { kind, title: file.name, url: media.url, storageKey: media.storageKey, bytes: media.bytes, mimeType: media.mimeType, durationMs: media.durationMs };
+                    }
+                    if (useUserStore.getState().user?.id !== owner) break;
+                    await insertReferenceAsset(payload, target);
+                    succeeded++;
+                } catch (error) {
+                    message.error(`${file.name}：${error instanceof Error ? error.message : "上传失败"}`);
+                }
+            }
+            if (succeeded) message.success(`已添加${succeeded}个参考素材`);
+        } finally {
+            referenceUploadBusyRef.current = false;
+            hideLoading();
+        }
+    }, [insertReferenceAsset, message, referenceImageCount]);
+
+    const handleAssetInsert = useCallback(async (payload: InsertAssetPayload) => {
+        try {
+            if (referenceAssetTarget) await insertReferenceAsset(payload, referenceAssetTarget);
+            else await insertAssetAtRef.current(payload, assetInsertPositionRef.current || undefined);
+            assetInsertPositionRef.current = null;
+            setReferenceAssetTarget(null);
             setAssetPickerOpen(false);
-        },
-        [],
-    );
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "素材插入失败");
+        }
+    }, [insertReferenceAsset, message, referenceAssetTarget]);
 
     const focusNode = useCallback(
         (nodeId: string) => {
@@ -4562,6 +4681,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                         onStop={handleStopNode}
                                         onDisconnectReference={disconnectNodeReference}
                                         onStartReferenceSelection={startNodeReferenceSelection}
+                                        onAddReference={handleAddReference}
                                         onImageSettingsOpenChange={(open) => {
                                             setNodeImageSettingsOpen(open);
                                             if (open) setToolbarNodeId(null);
@@ -4791,7 +4911,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         </button>
                     </div>
                 ) : null}
-                <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" multiple aria-label="上传画布素材" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={referenceInputRef} type="file" multiple className="hidden" onChange={handleReferenceInputChange} aria-label="上传参考素材" />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
 
@@ -4952,7 +5073,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
                 </Modal>
 
-                <AssetPickerModal open={assetPickerOpen} defaultTab={assetPickerTab} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setAssetPickerOpen(false); }} />
+                <AssetPickerModal open={assetPickerOpen} defaultTab={assetPickerTab} allowedKinds={referenceAssetTarget?.allowedKinds} onInsert={handleAssetInsert} onClose={() => { assetInsertPositionRef.current = null; setReferenceAssetTarget(null); setAssetPickerOpen(false); }} />
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel

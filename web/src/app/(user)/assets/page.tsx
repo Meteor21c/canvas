@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { AssetFormModal } from "@/components/assets/asset-form-modal";
+import { AssetBatchUpload } from "@/components/assets/asset-batch-upload";
 
 const kindOptions = [
     { label: "全部", value: "all" },
@@ -166,6 +167,7 @@ export default function AssetsPage() {
                                 </div>
                             </div>
                             <div className="flex flex-wrap gap-4">
+                                <AssetBatchUpload size="small" onUploaded={() => { setPage(1); setKindFilter("image"); setCategoryFilter(""); setTagFilters([]); setKeyword(""); }} />
                                 <button
                                     type="button"
                                     className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"

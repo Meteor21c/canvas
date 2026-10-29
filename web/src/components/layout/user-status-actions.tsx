@@ -15,8 +15,10 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 type UserStatusActionsProps = {
+    className?: string;
+    showReturnLink?: boolean;
     showConfig?: boolean;
-    variant?: "default" | "canvas";
+    variant?: "default" | "canvas" | "sidebar";
     onOpenShortcuts?: () => void;
     accountOpen?: boolean;
     onAccountOpenChange?: (open: boolean) => void;
@@ -24,7 +26,7 @@ type UserStatusActionsProps = {
     getPopupContainer?: (node: HTMLElement) => HTMLElement;
 };
 
-export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts, accountOpen, onAccountOpenChange, accountRef, getPopupContainer }: UserStatusActionsProps) {
+export function UserStatusActions({ className, showReturnLink = true, showConfig = true, variant = "default", onOpenShortcuts, accountOpen, onAccountOpenChange, accountRef, getPopupContainer }: UserStatusActionsProps) {
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
@@ -57,22 +59,22 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     ];
 
     return (
-        <div className="inline-flex shrink-0 items-center gap-1">
-            <a href="/" className="mr-1 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-current/20 px-2.5 text-xs font-medium transition hover:bg-current/5" style={iconStyle} aria-label="返回流星 API">
+        <div className={cn("inline-flex shrink-0 items-center gap-1", className)}>
+            {showReturnLink ? <a href="/" className="mr-1 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-current/20 px-2.5 text-xs font-medium transition hover:bg-current/5" style={iconStyle} aria-label="返回流星 API">
                 <ArrowLeft className="size-3.5" />
                 <span>返回流星 API</span>
-            </a>
+            </a> : null}
             {showConfig ? (
                 <button type="button" className={cn(naturalIconClass, "hidden md:inline-flex")} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "canvas" ? "hidden lg:inline-flex" : "hidden md:inline-flex")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
+            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={cn(naturalIconClass, variant === "sidebar" ? "inline-flex" : variant === "canvas" ? "hidden lg:inline-flex" : "hidden md:inline-flex")} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
             <VersionReleaseModal
-                className={variant === "default" ? "hidden shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 sm:inline-flex dark:text-stone-400 dark:hover:text-white" : "hidden xl:inline-flex"}
+                className={variant === "canvas" ? "hidden xl:inline-flex" : cn("shrink-0 cursor-pointer text-xs font-medium text-stone-500 transition hover:text-stone-950 dark:text-stone-400 dark:hover:text-white", variant === "sidebar" ? "inline-flex" : "hidden sm:inline-flex")}
                 style={versionStyle}
             />
-            <GitHubLink className={cn("hidden bg-transparent hover:bg-transparent dark:hover:bg-transparent", variant === "canvas" ? "xl:inline-flex" : "sm:inline-flex", gitHubClassName)} style={gitHubStyle} />
+            <GitHubLink className={cn("bg-transparent hover:bg-transparent dark:hover:bg-transparent", variant === "sidebar" ? "inline-flex" : variant === "canvas" ? "hidden xl:inline-flex" : "hidden sm:inline-flex", gitHubClassName)} style={gitHubStyle} />
             {variant === "canvas" && user ? (
                 <Tooltip title="账户可用余额" placement="bottom">
                     <div className="hidden h-8 shrink-0 items-center gap-1.5 px-1.5 text-xs font-medium tabular-nums opacity-75 transition hover:opacity-100 lg:flex" style={{ color: canvasTheme.node.text }}>

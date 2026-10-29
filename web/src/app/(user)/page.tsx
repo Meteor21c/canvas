@@ -13,8 +13,8 @@ export default function IndexPage() {
     return (
         <main className="h-full overflow-x-hidden overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
             <div className="mx-auto w-full max-w-7xl px-5 pb-8 pt-8 sm:px-8 sm:pt-10 lg:px-10">
-                <section className="grid items-center gap-8 pb-9 lg:grid-cols-[0.85fr_1.15fr] lg:gap-12 lg:pb-10">
-                    <div className="max-w-xl py-2">
+                <section className="grid items-center gap-8 pb-9 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-7 lg:pb-10 xl:gap-12">
+                    <div className="min-w-0 max-w-xl py-2">
                         <p className="mb-5 flex items-center gap-2 text-xs font-medium tracking-[0.18em] text-stone-400 dark:text-stone-500">
                             <span className="h-px w-7 bg-stone-300 dark:bg-stone-700" />
                             METEOR STUDIO
@@ -52,12 +52,12 @@ export default function IndexPage() {
                             <ArrowUpRight className="size-3.5" aria-hidden="true" />
                         </Link>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                         {entries.map(({ href, title, description, icon: Icon, color, hint }) => (
                             <Link
                                 key={href}
                                 href={href}
-                                className="group flex min-h-48 flex-col rounded-2xl border border-stone-200/90 bg-white p-5 transition duration-200 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.18)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-stone-500 dark:border-stone-800 dark:bg-stone-900/60 dark:hover:border-stone-600"
+                                className="group flex min-h-48 min-w-0 flex-col rounded-2xl border border-stone-200/90 bg-white p-5 transition duration-200 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.18)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-stone-500 dark:border-stone-800 dark:bg-stone-900/60 dark:hover:border-stone-600"
                             >
                                 <div className="mb-5 flex items-center justify-between">
                                     <span className={`flex size-10 items-center justify-center rounded-xl ${color}`}>

@@ -1317,8 +1317,8 @@ export default function ImagePage() {
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
-            <main className={`${workbenchLayout === "side" ? "grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)]" : "relative flex flex-col"} min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:overflow-hidden`}>
+        <div className="relative flex h-full flex-col overflow-hidden bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+            <main className={`${workbenchLayout === "side" ? "grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)]" : "flex flex-col"} min-h-0 flex-1 gap-3 overflow-y-auto p-3 xl:overflow-hidden`}>
                 {workbenchLayout === "side" ? (
                     <>
                         <WorkbenchPanel
@@ -1590,7 +1590,7 @@ function WorkbenchPanel({
 
     if (layout === "bottom") {
         return (
-            <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-16">
+            <div className="pointer-events-none absolute inset-x-0 bottom-5 z-40 flex justify-center px-5 sm:bottom-7 sm:px-10 lg:px-8 xl:px-12">
                 <div className="pointer-events-auto w-full max-w-5xl rounded-[24px] bg-white/65 p-4 shadow-[0_32px_100px_rgba(15,23,42,.22),0_10px_34px_rgba(15,23,42,.10)] ring-1 ring-white/50 backdrop-blur-2xl dark:bg-stone-950/60 dark:ring-white/10 dark:shadow-[0_34px_110px_rgba(0,0,0,.58)]">
                     <div className="flex flex-col gap-3">
                         <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
@@ -1656,7 +1656,7 @@ function WorkbenchPanel({
     }
 
     return (
-        <div className="flex min-h-[420px] flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 lg:min-h-0">
+        <div className="flex min-h-[420px] min-w-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-card shadow-sm dark:border-stone-800 xl:min-h-0">
             <div className="shrink-0 p-4 pb-3">
                 <WorkbenchHeader currentLayout={currentLayout} onLayoutChange={onLayoutChange} />
             </div>
@@ -1900,15 +1900,15 @@ function ResultsPanel({
     }, [activeCategoryId, categories, onActiveCategoryChange]);
 
     return (
-        <div className={`thin-scrollbar rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 lg:min-h-0 lg:overflow-y-auto lg:p-5 ${className}`}>
-            <div className="mb-4 flex items-center justify-between gap-3">
+        <div className={`thin-scrollbar min-w-0 rounded-lg border border-stone-200 bg-card p-4 shadow-sm dark:border-stone-800 xl:min-h-0 xl:overflow-y-auto xl:p-5 ${className}`}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                     <History className="size-4 text-stone-400" />
                     <h2 className="truncate text-xl font-semibold">{activeCategory ? activeCategory.name : "全部结果"}</h2>
                     <Tag className="m-0">{totalCount}</Tag>
                     {pendingCount ? <Tag className="m-0 px-2 py-1">{pendingCount} 个生成中</Tag> : null}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex max-w-full flex-wrap items-center gap-2">
                     {activeCategory ? (
                         <Button size="small" onClick={() => onActiveCategoryChange(null)}>
                             返回分类
@@ -1944,7 +1944,7 @@ function ResultsPanel({
                 </div>
             </div>
             {shouldShowGrid ? (
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {results.map((result, index) =>
                         result.status === "success" && result.image ? (
                             <ResultImageCard

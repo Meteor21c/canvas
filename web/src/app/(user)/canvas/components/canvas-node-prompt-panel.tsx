@@ -20,7 +20,7 @@ import { CanvasCameraControl } from "./canvas-camera-control";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
-import { CanvasNodeReferenceBar } from "./canvas-node-reference-bar";
+import { CanvasNodeReferenceBar, type ReferenceAddSource } from "./canvas-node-reference-bar";
 import { CanvasVideoSettingsPopover, type CanvasVideoFrameOption, type CanvasVideoResourceOption } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
 import { PANORAMA_IMAGE_SIZE, isCanvasImageNodeType, isPanoramaNodeType } from "../utils/canvas-panorama";
@@ -42,12 +42,13 @@ type CanvasNodePromptPanelProps = {
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
     onStartReferenceSelection?: (nodeId: string, allowedKinds?: CanvasResourceKind[]) => void;
+    onAddReference?: (nodeId: string, source: ReferenceAddSource, allowedKinds?: CanvasResourceKind[]) => void;
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onAddReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -57,7 +58,7 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
     const videoSelection = useVideoSelection(config, (key, value) => onConfigChange(node.id, videoConfigPatch(key, value)), mode === "video");
     const siteVideo = mode === "video" && (config.videoChannelId || config.activeChannelId).startsWith("meteor-key-");
     const videoInput = siteVideo ? videoSelection.data?.videoInput : undefined;
-    const referenceKinds: CanvasResourceKind[] | undefined = siteVideo ? ["text", ...(videoInput?.modes.includes("reference") ? videoInput.referenceTypes.filter((kind): kind is "image" | "video" | "audio" => kind === "image" || kind === "video" || kind === "audio") : []), ...(videoInput?.modes.includes("frames") && (videoInput.firstFrame || videoInput.lastFrame) ? ["image" as const] : [])] : undefined;
+    const referenceKinds: CanvasResourceKind[] | undefined = siteVideo ? ["text", ...(videoInput?.modes.includes("reference") ? videoInput.referenceTypes.filter((kind): kind is "image" | "video" | "audio" => kind === "image" || kind === "video" || kind === "audio") : []), ...(videoInput?.modes.includes("frames") && (videoInput.firstFrame || videoInput.lastFrame) ? ["image" as const] : [])] : mode === "image" ? ["text", "image"] : undefined;
     const selectableMentions = referenceKinds ? mentionReferences.filter((reference) => referenceKinds.includes(reference.kind)) : mentionReferences;
     const selectableFrames = siteVideo && !videoInput?.modes.includes("frames") ? [] : videoFrameOptions;
     const selectableResources = siteVideo ? videoResourceOptions.filter((resource) => resource.kind === "text" || Boolean(videoInput?.modes.includes("reference") && videoInput.referenceTypes.includes(resource.kind))) : videoResourceOptions;
@@ -150,7 +151,7 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={startReferenceSelection} />
+            <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={startReferenceSelection} onAddReference={(nodeId, source) => onAddReference?.(nodeId, source, referenceKinds)} canUpload={!referenceKinds || referenceKinds.some((kind) => kind !== "text")} />
             {siteVideo ? <p className="mb-2 text-[10px] leading-4 opacity-60">{REFERENCE_UPLOAD_NOTICE} · 素材保留7天</p> : null}
             {incompatibleFrames ? <p className="mb-2 text-xs leading-4 text-amber-600 dark:text-amber-400">已保留原首尾帧选择；当前模型不支持该组合，请在视频设置中调整或明确移除后再生成。</p> : null}
             <CanvasPromptChipInput
@@ -223,7 +224,7 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
             {mode === "image" || mode === "video" ? <div className="mt-3 border-t border-stone-200/70 pt-3 dark:border-stone-700/70"><PriceSummary config={config} capability={mode} model={config.model} inputVideo={connectedNodes.some(item => item.type === CanvasNodeType.Video)} compact /></div> : null}
             <Modal title="编辑提示词" open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-                    <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); startReferenceSelection(nodeId); }} />
+                    <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); startReferenceSelection(nodeId); }} onAddReference={(nodeId, source) => { setExpanded(false); onAddReference?.(nodeId, source, referenceKinds); }} canUpload={!referenceKinds || referenceKinds.some((kind) => kind !== "text")} />
                     <CanvasPromptChipInput
                         value={prompt}
                         references={selectableMentions}

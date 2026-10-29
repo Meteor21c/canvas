@@ -7,10 +7,12 @@ import { ImagePlus, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { AssetBatchUpload } from "@/components/assets/asset-batch-upload";
 import { fetchAssetLibrary, type AssetLibraryItem } from "@/services/api/assets";
 import { uploadAssetMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
 import type { InsertAssetPayload } from "../types";
+import type { CanvasResourceKind } from "../utils/canvas-resource-references";
 
 export type { InsertAssetPayload } from "../types";
 
@@ -19,11 +21,12 @@ export type AssetPickerTab = "my-assets" | "library";
 type Props = {
     open: boolean;
     defaultTab?: AssetPickerTab;
+    allowedKinds?: CanvasResourceKind[];
     onInsert: (payload: InsertAssetPayload) => void;
     onClose: () => void;
 };
 
-export function AssetPickerModal({ open, defaultTab = "my-assets", onInsert, onClose }: Props) {
+export function AssetPickerModal({ open, defaultTab = "my-assets", allowedKinds, onInsert, onClose }: Props) {
     const [activeTab, setActiveTab] = useState<AssetPickerTab>(defaultTab);
 
     useEffect(() => {
@@ -36,8 +39,8 @@ export function AssetPickerModal({ open, defaultTab = "my-assets", onInsert, onC
                 activeKey={activeTab}
                 onChange={(key) => setActiveTab(key as AssetPickerTab)}
                 items={[
-                    { key: "my-assets", label: "我的素材", children: <MyAssetsTab onInsert={onInsert} /> },
-                    { key: "library", label: "素材库", children: <LibraryTab onInsert={onInsert} /> },
+                    { key: "my-assets", label: "我的素材", children: <MyAssetsTab onInsert={onInsert} allowedKinds={allowedKinds} /> },
+                    { key: "library", label: "素材库", children: <LibraryTab onInsert={onInsert} allowedKinds={allowedKinds} /> },
                 ]}
             />
         </Modal>
@@ -54,23 +57,30 @@ const kindOptions = [
     { label: "音频", value: "audio" },
 ];
 
-function LibraryTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
+function LibraryTab({ onInsert, allowedKinds }: { onInsert: (payload: InsertAssetPayload) => void; allowedKinds?: CanvasResourceKind[] }) {
     const { message } = App.useApp();
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState("");
     const [page, setPage] = useState(1);
     const [inserting, setInserting] = useState<string | null>(null);
+    const allowedKey = allowedKinds?.join(",");
+    const effectiveKind = allowedKinds && !allowedKinds.includes(kindFilter as CanvasResourceKind) ? allowedKinds[0] || "" : kindFilter;
+    const availableKinds = allowedKinds ? kindOptions.filter((option) => allowedKinds.includes(option.value as CanvasResourceKind)) : kindOptions;
+
+    useEffect(() => { setPage(1); }, [allowedKey]);
 
     const query = useQuery({
-        queryKey: ["asset-picker-library", keyword, kindFilter, page],
-        queryFn: () => fetchAssetLibrary({ keyword, type: kindFilter, page, pageSize: PAGE_SIZE }),
+        queryKey: ["asset-picker-library", keyword, effectiveKind, page, allowedKey],
+        queryFn: () => fetchAssetLibrary({ keyword, type: effectiveKind, page, pageSize: PAGE_SIZE }),
+        enabled: allowedKinds === undefined || allowedKinds.length > 0,
         retry: false,
     });
 
-    const items = query.data?.items || [];
-    const total = query.data?.total || 0;
+    const items = (query.data?.items || []).filter((asset) => !allowedKinds || allowedKinds.includes(asset.type));
+    const total = allowedKinds?.length === 0 ? 0 : query.data?.total || 0;
 
     const handleInsert = async (asset: AssetLibraryItem) => {
+        if (allowedKinds && !allowedKinds.includes(asset.type)) return;
         try {
             setInserting(asset.id);
             if (asset.type === "text") {
@@ -105,20 +115,14 @@ function LibraryTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => v
                     }}
                 />
                 <div className="flex gap-1.5">
-                    {[
-                        { label: "全部", value: "" },
-                        { label: "文本", value: "text" },
-                        { label: "图片", value: "image" },
-                        { label: "视频", value: "video" },
-                        { label: "音频", value: "audio" },
-                    ].map((opt) => (
+                    {availableKinds.map((opt) => (
                         <Tag.CheckableTag
                             key={opt.value || "all"}
-                            checked={kindFilter === opt.value}
-                            className={cn("prompt-filter-tag", kindFilter === opt.value && "is-active")}
+                            checked={effectiveKind === opt.value || !effectiveKind && opt.value === "all"}
+                            className={cn("prompt-filter-tag", (effectiveKind === opt.value || !effectiveKind && opt.value === "all") && "is-active")}
                             onChange={() => {
                                 setPage(1);
-                                setKindFilter(opt.value);
+                                setKindFilter(opt.value === "all" ? "" : opt.value);
                             }}
                         >
                             {opt.label}
@@ -179,7 +183,7 @@ function PickerCard({ title, kind, cover, loading, onClick }: { title: string; k
     );
 }
 
-function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
+function MyAssetsTab({ onInsert, allowedKinds }: { onInsert: (payload: InsertAssetPayload) => void; allowedKinds?: CanvasResourceKind[] }) {
     const { message } = App.useApp();
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -194,14 +198,16 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     const [saving, setSaving] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const effectiveKind = kindFilter !== "all" && allowedKinds && !allowedKinds.includes(kindFilter as CanvasResourceKind) ? "all" : kindFilter;
 
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets
             .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video" || a.kind === "audio")
-            .filter((a) => kindFilter === "all" || a.kind === kindFilter)
+            .filter((a) => !allowedKinds || allowedKinds.includes(a.kind))
+            .filter((a) => effectiveKind === "all" || a.kind === effectiveKind)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
-    }, [assets, keyword, kindFilter]);
+    }, [assets, keyword, effectiveKind, allowedKinds]);
 
     const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
@@ -211,6 +217,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     }, [filtered.length]);
 
     const handleInsert = (asset: Asset) => {
+        if (allowedKinds && !allowedKinds.includes(asset.kind)) return;
         if (asset.kind === "text") {
             onInsert({ kind: "text", content: asset.data.content, title: asset.title, assetId: asset.id, source: "asset" });
         } else {
@@ -318,11 +325,11 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
                     }}
                 />
                 <div className="flex gap-1.5">
-                    {kindOptions.map((opt) => (
+                    {kindOptions.filter((opt) => opt.value === "all" || !allowedKinds || allowedKinds.includes(opt.value as CanvasResourceKind)).map((opt) => (
                         <Tag.CheckableTag
                             key={opt.value}
-                            checked={kindFilter === opt.value}
-                            className={cn("prompt-filter-tag", kindFilter === opt.value && "is-active")}
+                            checked={effectiveKind === opt.value}
+                            className={cn("prompt-filter-tag", effectiveKind === opt.value && "is-active")}
                             onChange={() => {
                                 setPage(1);
                                 setKindFilter(opt.value);
@@ -335,6 +342,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
                 <Button size="small" icon={<Plus className="size-3.5" />} onClick={() => setCreateOpen(true)}>
                     新增素材
                 </Button>
+                <AssetBatchUpload size="small" onUploaded={() => { setPage(1); setKindFilter(allowedKinds && !allowedKinds.includes("image") ? "all" : "image"); setKeyword(""); }} />
             </div>
 
             {visible.length ? (
