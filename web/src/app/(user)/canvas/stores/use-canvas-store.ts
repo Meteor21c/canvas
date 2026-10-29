@@ -57,7 +57,7 @@ export function safeCanvasProject(project: CanvasProject): CanvasProject {
         if (typeof value === "string" && /^https?:\/\//i.test(value)) {
             try { const url = new URL(value); if (url.search || url.hash || url.username || url.password) return ""; } catch { return ""; }
         }
-        if (typeof value === "string" && /^\/(?:api|v1|media|files)\//.test(value) && /[?#]/.test(value)) return "";
+        if (typeof value === "string" && /^\/(?:studio\/)?(?:api|v1|media|files)\//.test(value) && /[?#]/.test(value)) return "";
         return value;
     })) as CanvasProject;
     if (new Blob([JSON.stringify(safe)]).size > MAX_PROJECT_BYTES) throw new Error("单个画布元数据不能超过 1 MiB，请减少节点或文字");

@@ -136,7 +136,6 @@ export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     }
     if (storageKey.startsWith("server:")) {
         const id = storageKey.slice("server:".length);
-        if (fallback && !fallback.startsWith("blob:") && !fallback.includes("direct=1") && !fallback.startsWith("/studio/webdav-media/")) return fallback;
         const { getStorageObjectInfo } = await import("@/services/api/storage");
         const info = await getStorageObjectInfo(id).catch(() => null);
         if (!info) return fallback;

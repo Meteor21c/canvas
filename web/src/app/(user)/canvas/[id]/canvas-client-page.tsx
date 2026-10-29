@@ -14,7 +14,8 @@ import { createVideoGenerationTask, pollVideoGenerationTaskStatus, VIDEO_POLL_IN
 import { comfyOutputStorageKey, getWorkflowTask, submitWorkflowTask, workflowMediaSource, type WorkflowGenerationTask } from "@/services/api/workflow-generation";
 import type { WorkflowRef } from "@/lib/workflow-channel";
 import { channelProtocolForConfig, defaultConfig, resolveModelForCapability, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { collectImageStorageKeys, deleteStoredImages, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
+import { autoSyncToCloud, collectImageStorageKeys, deleteStoredImages, getImageBlob, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
+import { useMediaUrl } from "@/hooks/use-media-url";
 import { downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -2325,7 +2326,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             try {
                 const images = await Promise.all(
                     captures.map(async (capture) => {
-                        const image = await uploadImage(capture.dataUrl, { localOnly: true });
+                        const image = await uploadImage(capture.dataUrl);
                         return {
                             id: nanoid(),
                             title: capture.fileName,
@@ -2399,10 +2400,14 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [message],
     );
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((!isCanvasImageNodeType(node.type) && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
-    }, []);
+        try {
+            const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
+            if (!url) throw new Error("素材不可用，请重新打开画布后重试");
+            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
+        } catch (error) { message.error(error instanceof Error ? error.message : "下载失败，请稍后重试"); }
+    }, [message]);
 
     const disconnectNodeReference = useCallback((fromNodeId: string, toNodeId: string) => {
         setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== fromNodeId || connection.toNodeId !== toNodeId));
@@ -2581,7 +2586,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             if (!node.metadata?.content) return message.error("没有可保存的图片");
             try {
-                const stored = !node.metadata.storageKey && node.metadata.content.startsWith("blob:") ? await uploadImage(node.metadata.content, { localOnly: true }) : null;
+                const stored = !node.metadata.storageKey && node.metadata.content.startsWith("blob:") ? await uploadImage(node.metadata.content) : null;
                 const imageUrl = stored?.url || node.metadata.content;
                 const storageKey = stored?.storageKey || node.metadata.storageKey;
                 const dataUrl = storageKey ? "" : imageUrl;
@@ -5042,6 +5047,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     return (
                         <FullscreenPreview
                             src={activeItemNode.metadata?.content || ""}
+                            storageKey={activeItemNode.metadata?.storageKey}
                             alt={activeItemNode.title || "图片"}
                             isVideo={activeItemNode.type === CanvasNodeType.Video}
                             isPanorama={activeItemNode.type === CanvasNodeType.Panorama}
@@ -5110,7 +5116,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 }
 
-function FullscreenPreview({ src, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+function FullscreenPreview({ src: source, storageKey, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; storageKey?: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+    const src = useMediaUrl(storageKey, source, isVideo ? "media" : "image");
     const [zoom, setZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -5648,17 +5655,25 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 }
 
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    return Promise.all(
+    const restored = await Promise.allSettled(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
             if (!isCanvasImageNodeType(node.type)) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
+            if (node.metadata?.storageKey) {
+                if (node.metadata.storageKey.startsWith("image:")) {
+                    const blob = await getImageBlob(node.metadata.storageKey).catch(() => null);
+                    const uploaded = blob && await autoSyncToCloud(`restore:${node.metadata.storageKey}`, () => uploadImage(blob));
+                    if (uploaded?.storageKey.startsWith("server:")) return { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded) } };
+                }
+                return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
+            }
             if (!content) return node;
             if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content, { localOnly: true })) } };
+            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
         }),
     );
+    return restored.map((result, index) => result.status === "fulfilled" ? result.value : nodes[index]);
 }
 
 function syncAssistantReferences(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[], restoreInterrupted = false, previousNode?: CanvasNodeData) {
