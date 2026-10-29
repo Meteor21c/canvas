@@ -15,7 +15,12 @@ const objectUrls = new Map<string, string>();
 let storageConfigPromise: Promise<StorageConfig> | null = null;
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file", syncId?: string, tokenOverride?: string): Promise<UploadedFile> {
+    const checkOwner = () => {
+        if (tokenOverride !== undefined && useUserStore.getState().token !== tokenOverride) throw new Error("登录状态已变化，请重新上传素材");
+    };
+    checkOwner();
     const blob = typeof input === "string" ? await (await studioFetch(input)).blob() : input;
+    checkOwner();
     const uploaded = await autoSyncToCloud(syncId || blob, async () => {
         const metadataUrl = blob.type.startsWith("video/") ? URL.createObjectURL(blob) : undefined;
         try {
@@ -24,9 +29,11 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", syn
             if (metadataUrl) URL.revokeObjectURL(metadataUrl);
         }
     });
+    checkOwner();
     if (uploaded) return uploaded;
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
+    checkOwner();
     const url = meteorObjectUrl(storageKey, blob);
     objectUrls.set(storageKey, url);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : {};

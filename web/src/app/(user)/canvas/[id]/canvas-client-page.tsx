@@ -4430,17 +4430,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
         referenceInsertBusyRef.current = true;
         try {
-        const id = `reference-${nanoid()}`;
-        const index = connectionsRef.current.filter((connection) => connection.toNodeId === node.id).length;
-        await insertAssetAtRef.current(payload, { x: node.position.x - 360 - Math.floor(index / 3) * 720, y: node.position.y + (index % 3) * 720 }, id);
-        if (!owner.current() || !nodesRef.current.some((item) => item.id === node.id)) return;
-        if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
-        const next = [...connectionsRef.current, { id: nanoid(), fromNodeId: id, toNodeId: node.id }];
-        connectionsRef.current = next;
-        setConnections(next);
-        setSelectedNodeIds(new Set([node.id]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(node.id);
+            const id = `reference-${nanoid()}`;
+            const index = connectionsRef.current.filter((connection) => connection.toNodeId === node.id).length;
+            await insertAssetAtRef.current(payload, { x: node.position.x - 360 - Math.floor(index / 3) * 720, y: node.position.y + (index % 3) * 720 }, id);
+            if (!owner.current() || !nodesRef.current.some((item) => item.id === node.id)) return;
+            if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
+            const next = [...connectionsRef.current, { id: nanoid(), fromNodeId: id, toNodeId: node.id }];
+            connectionsRef.current = next;
+            setConnections(next);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(node.id);
         } finally { referenceInsertBusyRef.current = false; }
     }, [captureUploadOwner, referenceImageCount]);
 
