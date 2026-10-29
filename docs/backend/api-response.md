@@ -23,6 +23,12 @@ description: 业务接口统一响应结构与前端处理约定
 
 接口连接失败、服务不可达、返回体不是约定 JSON 时，前端按网络或接口异常处理。
 
+## 流星媒体下载
+
+- `POST /api/v1/meteor/download` 必须携带主站账户鉴权；请求为 `{ storageKey?, videoTaskId?, filename }`，素材键和任务 ID 必须二选一。仅允许当前账户的有效素材或已完成视频，不接受上游地址、密钥或任意回源 URL。
+- 成功返回 `{ code: 0, data: { url }, msg: "ok" }`，`url` 为本站短时签名地址，浏览器通过原生链接下载。接口不读取视频正文，也不创建生成任务。
+- 下载响应使用 `Content-Disposition: attachment`，保留可用的 `Content-Length`、`Content-Range` 和 `Accept-Ranges`；签名沿用现有有效期，七天媒体留存不因下载延长。
+
 ## AutoDL 渠道
 
 - `POST /api/ai/autodl/workflows` 使用上述业务响应结构。请求为 `{ baseUrl, workflowId? }`，不传上游 API Key；不带工作流 ID 返回列表，带 ID 返回详情。元数据包含 `uuid`、`name`、`kind` 和详情的 `input_rules`，不返回上游内部节点映射。

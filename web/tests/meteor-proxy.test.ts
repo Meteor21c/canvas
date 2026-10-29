@@ -57,3 +57,31 @@ test("media does not execute upstream HTML/SVG and JSON does not set cookies", a
     expect(result.headers.get("Set-Cookie")).toBeNull(); expect(result.headers.get("Server")).toBeNull();
     expect(result.headers.get("Cache-Control")).toBe("no-store");
 });
+
+test("native media downloads stream before completion and preserve length, range and attachment headers", async () => {
+    let finish!: () => void;
+    reply = () => new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode("first"));
+        finish = () => { controller.enqueue(new TextEncoder().encode("last")); controller.close(); };
+    } }), { status: 206, headers: { "Content-Type": "video/mp4", "Content-Length": "9", "Content-Range": "bytes 0-8/20", "Accept-Ranges": "bytes", "Content-Disposition": "attachment; filename=video.mp4", "X-Accel-Buffering": "no" } });
+    const result = await route.GET(request("v1/videos/id/content?download=1", "GET", { Range: "bytes=0-8" }), context("v1/videos/id/content"));
+    expect(result.status).toBe(206);
+    expect((calls[0].init!.headers as Headers).get("Range")).toBe("bytes=0-8");
+    expect(result.headers.get("Content-Length")).toBe("9");
+    expect(result.headers.get("Content-Range")).toBe("bytes 0-8/20");
+    expect(result.headers.get("Accept-Ranges")).toBe("bytes");
+    expect(result.headers.get("Content-Disposition")).toContain("attachment");
+    expect(result.headers.get("X-Accel-Buffering")).toBe("no");
+    const reader = result.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("first");
+    finish();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("last");
+    expect((await reader.read()).done).toBe(true);
+});
+
+test("encoded media never forwards a stale compressed content length", async () => {
+    reply = () => new Response("decompressed", { headers: { "Content-Type": "video/mp4", "Content-Encoding": "gzip", "Content-Length": "5" } });
+    const result = await route.GET(request("files/id/content"), context("files/id/content"));
+    expect(result.headers.get("Content-Length")).toBeNull();
+    expect(result.headers.get("Content-Encoding")).toBeNull();
+});

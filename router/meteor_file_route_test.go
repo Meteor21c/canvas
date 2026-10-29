@@ -50,6 +50,13 @@ func TestMeteorSignedFileContentThroughRouter(t *testing.T) {
 	if partial.Code != http.StatusPartialContent || partial.Body.String() != string(data[:8]) {
 		t.Fatalf("signed range HTTP %d: %s", partial.Code, partial.Body.String())
 	}
+	download := httptest.NewRecorder()
+	downloadRequest := httptest.NewRequest(http.MethodGet, signed+"&download=1&filename=fixture.png", nil)
+	downloadRequest.Header.Set("Range", "bytes=0-7")
+	engine.ServeHTTP(download, downloadRequest)
+	if download.Code != http.StatusPartialContent || download.Body.Len() != 8 || download.Header().Get("Content-Length") != "8" || !strings.Contains(download.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("native download lost range/length/attachment: HTTP %d headers=%v", download.Code, download.Header())
+	}
 	badSignature, _ := url.Parse(signed)
 	query := badSignature.Query()
 	query.Set("signature", strings.Repeat("0", 64))

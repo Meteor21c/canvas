@@ -32,7 +32,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { App, Button, Checkbox, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
-import { saveAs } from "file-saver";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
@@ -51,6 +50,7 @@ import { isMiniMaxH3Config } from "@/lib/minimax-video";
 import { ARK_SEEDANCE_REFERENCE_LIMITS, boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { isAgnesVideoV25Model, modelKey, supportsVideoFrameReferences } from "@/lib/video-model-capabilities";
 import { deleteStoredMedia, downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer } from "@/services/file-storage";
+import { downloadVideoFile } from "@/services/media-download";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { deleteVideoGenerationLogs, fetchVideoGenerationLogs, saveVideoGenerationLogs } from "@/services/api/generation-logs";
 import { createVideoGenerationTask, deleteVideoGenerationTask, listVideoGenerationTasks, pollVideoGenerationTaskStatus, VIDEO_POLL_INTERVAL_MS, VideoRequestError, type VideoResponse } from "@/services/api/video";
@@ -1135,9 +1135,9 @@ export default function VideoPage() {
     };
 
     const downloadVideo = async (video: GeneratedVideo) => {
-        const hideLoading = message.loading("正在下载视频...", 0);
+        const hideLoading = message.loading("正在准备下载…", 0);
         try {
-            saveAs(await downloadRemoteMedia(video.url), "video.mp4");
+            await downloadVideoFile(video.url, video.storageKey, "video.mp4");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "视频下载失败");
         } finally {

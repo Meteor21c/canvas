@@ -466,6 +466,7 @@ func meteorVideoContent(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	service.SetMeteorDownloadHeaders(w, r)
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(response.Body, 512<<20))
 }

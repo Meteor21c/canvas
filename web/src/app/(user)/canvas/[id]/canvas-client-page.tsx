@@ -17,6 +17,7 @@ import { channelProtocolForConfig, defaultConfig, resolveModelForCapability, typ
 import { autoSyncToCloud, collectImageStorageKeys, deleteStoredImages, getImageBlob, resolveImageUrl, uploadImage, uploadRemoteImageToServer, type UploadedImage } from "@/services/image-storage";
 import { useMediaUrl } from "@/hooks/use-media-url";
 import { downloadRemoteMedia, resolveMediaUrl, uploadMediaFile, uploadRemoteMediaToServer, type UploadedFile } from "@/services/file-storage";
+import { downloadVideoFile } from "@/services/media-download";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -2419,6 +2420,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((!isCanvasImageNodeType(node.type) && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
         try {
+            if (node.type === CanvasNodeType.Video) {
+                await downloadVideoFile(node.metadata.content, node.metadata.storageKey, `canvas-video-${node.id}.mp4`);
+                return;
+            }
             const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
             if (!url) throw new Error("素材不可用，请重新打开画布后重试");
             saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);

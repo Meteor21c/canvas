@@ -29,8 +29,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
             return Response.json({ code: 1, data: null, msg: "媒体接口返回了不可转发的重定向" }, { status: 502 });
         }
         const outgoing = new Headers(response.headers);
-        ["content-length", "content-encoding", "transfer-encoding", "connection", "set-cookie", "server"].forEach(name => outgoing.delete(name));
+        ["content-encoding", "transfer-encoding", "connection", "set-cookie", "server"].forEach(name => outgoing.delete(name));
         const mediaPath = path[0] === "proxy-image" || path[0] === "files" || (path[0] === "v1" && path.includes("content"));
+        // fetch may transparently decompress encoded bodies; only keep exact
+        // unencoded media lengths so native downloads can display progress.
+        if (!mediaPath || response.headers.has("content-encoding")) outgoing.delete("content-length");
         if (mediaPath) {
             const contentType = outgoing.get("Content-Type") || "";
             if (/text\/html|image\/svg\+xml|(?:java|ecma)script/i.test(contentType)) {

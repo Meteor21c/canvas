@@ -161,6 +161,7 @@ func FileContent(w http.ResponseWriter, r *http.Request, id string) {
 		w.Header().Set("Content-Length", strconv.FormatInt(download.ContentLength, 10))
 	}
 	if download.StatusCode != 0 {
+		service.SetMeteorDownloadHeaders(w, r)
 		w.WriteHeader(download.StatusCode)
 	}
 	_, _ = io.Copy(w, download.Stream)
