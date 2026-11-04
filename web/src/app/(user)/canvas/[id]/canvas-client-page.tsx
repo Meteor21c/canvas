@@ -22,8 +22,8 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
-import { VideoEnhanceDialog } from "@/components/video/video-enhance-dialog";
-import { getVideoEnhancement, VIDEO_ENHANCE_MODEL } from "@/services/api/video-enhance";
+import { VideoEnhanceDialog, type EnhanceSubmission } from "@/components/video/video-enhance-dialog";
+import { getVideoEnhancement, VIDEO_ENHANCE_MODEL, type EnhanceTask } from "@/services/api/video-enhance";
 import { isKIEKlingV3Config, kieKlingOmniVariant, normalizeVideoResolutionValue } from "@/components/video-settings-panel";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -419,7 +419,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
     const [openDirectorNodeId, setOpenDirectorNodeId] = useState<string | null>(null);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
-    const [videoEnhanceSource, setVideoEnhanceSource] = useState<{ node: CanvasNodeData; url: string } | null>(null);
+    const [videoEnhanceSource, setVideoEnhanceSource] = useState<{ node: CanvasNodeData; url: string; token: string; ownerId: string; projectId: string; uploadEpoch: number } | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [audioTrimNodeId, setAudioTrimNodeId] = useState<string | null>(null);
     const [audioTrimStart, setAudioTrimStart] = useState(0);
@@ -747,9 +747,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 const taskId = canvasVideoTaskId(node.metadata);
                 const workflowToken = node.metadata?.workflowRef ? useUserStore.getState().token : "";
                 const generationConfig = buildGenerationConfig(effectiveConfig, node, "video");
-                if (!taskId || (!node.metadata?.workflowRef && !isAiConfigReady(generationConfig, generationConfig.model))) return;
+                if (!taskId || (!isVideoEnhancementNode(node) && !node.metadata?.workflowRef && !isAiConfigReady(generationConfig, generationConfig.model))) return;
                 const controller = new AbortController();
                 pollingVideoNodeIdsRef.current.set(node.id, controller);
+                if (isVideoEnhancementNode(node)) {
+                    const ownerToken = useUserStore.getState().token;
+                    void getVideoEnhancement(taskId, "", false, controller.signal).then((task) => {
+                        if (!controller.signal.aborted && ownerToken === useUserStore.getState().token) setNodes((prev) => prev.map((item) => item.id === node.id && item.metadata?.videoTaskId === taskId ? applyVideoEnhancementTask(item, task) : item));
+                    }).catch(() => {
+                        if (!controller.signal.aborted && ownerToken === useUserStore.getState().token) setNodes((prev) => prev.map((item) => item.id === node.id && item.metadata?.status === NODE_STATUS_LOADING ? { ...item, metadata: { ...item.metadata, errorDetails: "任务状态待确认，请稍后刷新" } } : item));
+                    }).finally(() => pollingVideoNodeIdsRef.current.delete(node.id));
+                    return;
+                }
                 void (node.metadata?.workflowRef
                     ? getWorkflowTask(workflowToken, taskId, controller.signal).then((task) => workflowVideoTask(task, workflowToken))
                     : pollVideoGenerationTaskStatus(generationConfig, canvasVideoTaskFromMetadata(node.metadata), controller.signal))
@@ -2421,6 +2430,43 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         },
         [message],
     );
+
+    const saveEnhancementSubmission = useCallback((context: NonNullable<typeof videoEnhanceSource>, submission: EnhanceSubmission) => {
+        const user = useUserStore.getState();
+        if (user.token !== context.token || user.user?.id !== context.ownerId) return;
+        const project = useCanvasStore.getState().openProject(context.projectId);
+        if (!project) return;
+        const active = projectId === context.projectId && uploadEpochRef.current === context.uploadEpoch;
+        const currentNodes = active ? nodesRef.current : project.nodes;
+        const currentConnections = active ? connectionsRef.current : project.connections;
+        const existing = currentNodes.find((node) => isVideoEnhancementNode(node) && (node.metadata?.clientTaskId === submission.clientTaskId || node.metadata?.videoTaskId === submission.taskId));
+        if (submission.task && !existing) return;
+        let result: CanvasNodeData = existing || {
+            id: `enhanced-video-${nanoid()}`, type: CanvasNodeType.Video, title: `${context.node.title || "视频"} · 增强`,
+            position: { x: context.node.position.x + context.node.width + 96, y: context.node.position.y }, width: context.node.width, height: context.node.height,
+            metadata: { model: VIDEO_ENHANCE_MODEL, prompt: "视频增强", status: NODE_STATUS_LOADING, startedAt: Date.now(), taskBackend: "account", clientTaskId: submission.clientTaskId, videoTaskId: submission.taskId, channelId: submission.channelId, progress: 0, seconds: submission.sourceDurationSeconds ? String(submission.sourceDurationSeconds) : context.node.metadata?.seconds, size: context.node.metadata?.size, vquality: submission.resolution, videoEnhancementFrameRate: submission.frameRate },
+        };
+        if (submission.task) result = applyVideoEnhancementTask(result, submission.task);
+        const nextNodes = existing ? currentNodes.map((node) => node.id === existing.id ? result : node) : [...currentNodes, result];
+        const nextConnections = currentNodes.some((node) => node.id === context.node.id) && !currentConnections.some((connection) => connection.fromNodeId === context.node.id && connection.toNodeId === result.id) ? [...currentConnections, { id: nanoid(), fromNodeId: context.node.id, toNodeId: result.id }] : currentConnections;
+        updateProject(context.projectId, { nodes: nextNodes, connections: nextConnections });
+        if (active) { nodesRef.current = nextNodes; connectionsRef.current = nextConnections; setNodes(nextNodes); setConnections(nextConnections); setSelectedNodeIds(new Set([result.id])); setSelectedConnectionId(null); setDialogNodeId(null); }
+    }, [projectId, updateProject]);
+
+    const removeRejectedEnhancement = useCallback((context: NonNullable<typeof videoEnhanceSource>, clientTaskId: string) => {
+        const user = useUserStore.getState();
+        if (user.token !== context.token || user.user?.id !== context.ownerId) return;
+        const project = useCanvasStore.getState().openProject(context.projectId);
+        if (!project) return;
+        const active = projectId === context.projectId && uploadEpochRef.current === context.uploadEpoch;
+        const currentNodes = active ? nodesRef.current : project.nodes;
+        const rejected = currentNodes.find((node) => isVideoEnhancementNode(node) && node.metadata?.clientTaskId === clientTaskId && !node.metadata.content);
+        if (!rejected) return;
+        const nextNodes = currentNodes.filter((node) => node.id !== rejected.id);
+        const nextConnections = (active ? connectionsRef.current : project.connections).filter((connection) => connection.fromNodeId !== rejected.id && connection.toNodeId !== rejected.id);
+        updateProject(context.projectId, { nodes: nextNodes, connections: nextConnections });
+        if (active) { nodesRef.current = nextNodes; connectionsRef.current = nextConnections; setNodes(nextNodes); setConnections(nextConnections); setSelectedNodeIds(new Set([context.node.id])); }
+    }, [projectId, updateProject]);
 
     const refreshVideoNode = useCallback(async (node: CanvasNodeData) => {
         if (!isVideoEnhancementNode(node)) return node;
@@ -4893,16 +4939,20 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onExtractAudio={(node) => void extractAudio(node)}
                     onStop={handleStopNode}
+                    onRefreshVideo={(node) => { void refreshVideoNode(node).catch(() => message.info("任务状态待确认，请稍后刷新")); }}
                     onEnhanceVideo={(node) => {
                         if (isVideoEnhancementNode(node)) return message.info("如需再次增强，请下载后重新上传");
+                        const owner = captureUploadOwner();
+                        const ownerId = useUserStore.getState().user?.id || "";
                         setDialogNodeId(null);
                         setToolbarNodeId(null);
                         void refreshVideoNode(node).then((available) => {
                             if (videoEnhancementExpired(available)) throw new Error("增强结果已到期，请使用已下载的本地文件");
                             return resolveMediaUrl(available.metadata?.storageKey, available.metadata?.content);
                         }).then((url) => {
+                            if (!owner.current()) return;
                             if (!url) throw new Error("视频不可用，请重新打开画布后重试");
-                            setVideoEnhanceSource({ node, url });
+                            setVideoEnhanceSource({ node, url, token: owner.token, ownerId, projectId, uploadEpoch: uploadEpochRef.current });
                         }).catch((error) => message.error(error instanceof Error ? error.message : "视频读取失败"));
                     }}
                     onTrimAudio={(node) => setAudioTrimNodeId(node.id)}
@@ -5027,26 +5077,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     open={Boolean(videoEnhanceSource)}
                     sourceVideoUrl={videoEnhanceSource?.url}
                     onClose={() => setVideoEnhanceSource(null)}
+                    onSubmitted={(submission) => { if (videoEnhanceSource) saveEnhancementSubmission(videoEnhanceSource, submission); }}
+                    onRejected={(clientTaskId) => { if (videoEnhanceSource) removeRejectedEnhancement(videoEnhanceSource, clientTaskId); }}
                     onCompleted={({ taskId, videoUrl, prompt, expiresAt, resolution, frameRate }) => {
-                        const source = videoEnhanceSource?.node;
-                        if (!source) return;
-                        const id = `enhanced-video-${nanoid()}`;
-                        setNodes((prev) => [...prev, {
-                            id, type: CanvasNodeType.Video, title: `${source.title || "视频"} · 增强`,
-                            position: { x: source.position.x + source.width + 96, y: source.position.y },
-                            width: source.width, height: source.height,
-                            metadata: {
-                                content: videoUrl, prompt, status: "success", model: "tencent-mps-superres",
-                                mimeType: "video/mp4", progress: 100, videoTaskId: taskId, taskBackend: "account",
-                                seconds: source.metadata?.seconds, size: source.metadata?.size, vquality: resolution,
-                                videoEnhancementFrameRate: frameRate,
-                                videoEnhancementExpiresAt: expiresAt,
-                            },
-                        }]);
-                        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: source.id, toNodeId: id }]);
-                        setSelectedNodeIds(new Set([id]));
-                        setSelectedConnectionId(null);
-                        setDialogNodeId(null);
+                        setNodes((prev) => prev.map((node) => isVideoEnhancementNode(node) && node.metadata?.videoTaskId === taskId ? { ...node, metadata: { ...node.metadata, content: videoUrl, prompt, status: NODE_STATUS_SUCCESS, progress: 100, vquality: resolution, videoEnhancementFrameRate: frameRate, videoEnhancementExpiresAt: expiresAt } } : node));
                         setVideoEnhanceSource(null);
                     }}
                 />
@@ -5824,9 +5858,22 @@ async function refreshVideoEnhancementNode(node: CanvasNodeData): Promise<Canvas
     const owner = useUserStore.getState().token;
     const task = await getVideoEnhancement(node.metadata.videoTaskId, "", false);
     if (owner !== useUserStore.getState().token) throw new Error("登录状态已变化");
-    const expiresAt = Date.parse(task.expiresAt || task.expires_at || "") || (task.completed_at ? Date.parse(task.completed_at) + 86400000 : 0) || node.metadata.videoEnhancementExpiresAt;
+    return applyVideoEnhancementTask(node, task);
+}
+
+function applyVideoEnhancementTask(node: CanvasNodeData, task: EnhanceTask): CanvasNodeData {
+    const expiresAt = Date.parse(task.expiresAt || task.expires_at || "") || (task.completed_at ? Date.parse(task.completed_at) + 86400000 : 0) || node.metadata?.videoEnhancementExpiresAt;
     const expired = ["expired", "result_expired"].includes(task.status || "") || Boolean(expiresAt && Date.now() >= expiresAt);
-    return { ...node, metadata: { ...node.metadata, content: expired ? undefined : task.video_url || task.url || node.metadata.content, status: "success", videoEnhancementExpiresAt: expiresAt || (expired ? Date.now() : undefined) } };
+    const completed = ["completed", "succeeded", "success", "done"].includes(task.status || "");
+    const failed = ["failed", "cancelled", "canceled", "error"].includes(task.status || "");
+    return { ...node, metadata: {
+        ...node.metadata, model: VIDEO_ENHANCE_MODEL, taskBackend: "account", videoTaskId: task.id || node.metadata?.videoTaskId,
+        status: expired ? NODE_STATUS_SUCCESS : failed ? NODE_STATUS_ERROR : completed ? NODE_STATUS_SUCCESS : NODE_STATUS_LOADING,
+        content: expired || failed ? undefined : completed ? task.video_url || task.url || node.metadata?.content : undefined,
+        storageKey: "", mimeType: "video/mp4", progress: completed ? 100 : task.progress || node.metadata?.progress || 0,
+        errorDetails: failed ? task.error?.message || "视频增强未完成" : task.status === "submission_unknown" ? "任务状态待确认，请稍后刷新" : undefined,
+        videoEnhancementExpiresAt: expiresAt || (expired ? Date.now() : undefined),
+    } };
 }
 
 function syncAssistantReferences(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[], restoreInterrupted = false, previousNode?: CanvasNodeData) {

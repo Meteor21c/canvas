@@ -26,6 +26,7 @@ type CanvasNodeHoverToolbarProps = {
     onUpload: (node: CanvasNodeData) => void;
     onExtractAudio: (node: CanvasNodeData) => void;
     onEnhanceVideo: (node: CanvasNodeData) => void;
+    onRefreshVideo: (node: CanvasNodeData) => void;
     onStop: (nodeId: string) => void;
     onTrimAudio: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
@@ -69,6 +70,7 @@ export function CanvasNodeHoverToolbar({
     onUpload,
     onExtractAudio,
     onEnhanceVideo,
+    onRefreshVideo,
     onStop,
     onTrimAudio,
     onDownload,
@@ -195,7 +197,8 @@ export function CanvasNodeHoverToolbar({
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
     ];
     const nodeToolbarTools: ToolbarTool[] = [
-        ...(isVideo && node.metadata?.clientTaskId && ["loading", "stopping"].includes(node.metadata?.status || "") ? [{ id: "stop", title: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止生成", label: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止", icon: <Square className="size-4" />, disabled: node.metadata.status === "stopping" && !node.metadata.errorDetails, onClick: () => onStop(node.id) }] : []),
+        ...(isVideo && !isEnhancement && node.metadata?.clientTaskId && ["loading", "stopping"].includes(node.metadata?.status || "") ? [{ id: "stop", title: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止生成", label: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止", icon: <Square className="size-4" />, disabled: node.metadata.status === "stopping" && !node.metadata.errorDetails, onClick: () => onStop(node.id) }] : []),
+        ...(isEnhancement && node.metadata?.status === "loading" ? [{ id: "refresh", title: "刷新状态", label: "刷新状态", icon: <RefreshCw className="size-4" />, onClick: () => onRefreshVideo(node) }] : []),
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(!isEnhancement && (hasImage || hasVideo || isText) ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(!isEnhancement && (hasVideo || hasAudio) && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadMediaToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadMediaToCloud(node) }] : []),

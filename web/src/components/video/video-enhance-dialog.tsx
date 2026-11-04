@@ -16,7 +16,8 @@ import { normalizeLocalChannels, useEffectiveConfig } from "@/stores/use-config-
 import { useUserStore } from "@/stores/use-user-store";
 
 type EnhanceResult = { taskId: string; videoUrl: string; prompt: string; expiresAt?: number; resolution?: string; frameRate?: number };
-type Props = { sourceVideoUrl?: string; onCompleted?: (result: EnhanceResult) => void };
+export type EnhanceSubmission = { clientTaskId: string; taskId: string; channelId: string; resolution: string; frameRate: number; sourceDurationSeconds?: number; task?: EnhanceTask };
+type Props = { sourceVideoUrl?: string; onSubmitted?: (submission: EnhanceSubmission) => void; onRejected?: (clientTaskId: string) => void; onCompleted?: (result: EnhanceResult) => void };
 const complete = (task: EnhanceTask) => ["completed", "succeeded", "success", "done"].includes(task.status || "");
 const failed = (task: EnhanceTask) => ["failed", "cancelled", "expired", "result_expired"].includes(task.status || "");
 const taskExpiry = (task: EnhanceTask) => Date.parse(task.expiresAt || task.expires_at || "") || (task.completed_at ? Date.parse(task.completed_at) + 86400000 : 0);
@@ -27,7 +28,7 @@ export function VideoEnhanceDialog({ open, onClose, ...props }: Props & { open: 
     return <Modal title="增强画质" open={open} onCancel={onClose} footer={null} width={780} destroyOnHidden><VideoEnhancePanel {...props} /></Modal>;
 }
 
-export function VideoEnhancePanel({ sourceVideoUrl = "", onCompleted }: Props) {
+export function VideoEnhancePanel({ sourceVideoUrl = "", onSubmitted, onRejected, onCompleted }: Props) {
     const config = useEffectiveConfig();
     const token = useUserStore(state => state.token);
     const { message } = App.useApp();
@@ -54,6 +55,9 @@ export function VideoEnhancePanel({ sourceVideoUrl = "", onCompleted }: Props) {
     const [refreshingTask, setRefreshingTask] = useState(false);
     const notified = useRef(new Set<string>());
     const onCompletedRef = useRef(onCompleted); onCompletedRef.current = onCompleted;
+    const onSubmittedRef = useRef(onSubmitted); onSubmittedRef.current = onSubmitted;
+    const onRejectedRef = useRef(onRejected); onRejectedRef.current = onRejected;
+    const activeSubmission = useRef<{ input: EnhanceSubmission; update?: Props["onSubmitted"] } | null>(null);
     const choices = useMemo(() => (config.channelMode === "remote" ? config.publicChannels : normalizeLocalChannels(config)).filter(channel => channel.models?.includes(VIDEO_ENHANCE_MODEL)), [config]);
     const channelId = choices.find(channel => channel.id === selectedChannel)?.id || choices[0]?.id || "";
     const personal = config.channelMode !== "remote";
@@ -70,7 +74,7 @@ export function VideoEnhancePanel({ sourceVideoUrl = "", onCompleted }: Props) {
     useEffect(() => {
         const currentSession = ++session.current;
         setTask(null); setHistory([]); setSource(sourceVideoUrl); setDuration(0); setUploading(false); setSubmitting(false); setPicker(false); setStatusError(""); setRefreshingTask(false); setClock(Date.now());
-        busyRef.current = false; activeTaskId.current = ""; pendingRequest.current = ""; submittedTask.current = ""; notified.current.clear(); lastRenewal.current.clear();
+        busyRef.current = false; activeTaskId.current = ""; pendingRequest.current = ""; submittedTask.current = ""; activeSubmission.current = null; notified.current.clear(); lastRenewal.current.clear();
         return () => { if (session.current === currentSession) session.current++; };
     }, [token, sourceVideoUrl]);
     const refreshHistory = useCallback(async (signal?: AbortSignal) => {
@@ -84,6 +88,8 @@ export function VideoEnhancePanel({ sourceVideoUrl = "", onCompleted }: Props) {
             const next = await getVideoEnhancement(id, "", false, signal);
             if (signal?.aborted || owner.current !== currentOwner || session.current !== currentSession || activeTaskId.current !== id) return;
             setTask(next); setStatusError(""); setClock(Date.now());
+            const submission = activeSubmission.current;
+            if (submission && [submission.input.clientTaskId, submission.input.taskId].includes(id)) submission.update?.({ ...submission.input, taskId: next.id, task: next });
             if (pendingRequest.current === id) { submittedTask.current = next.id; pendingRequest.current = ""; }
             if (complete(next) || failed(next)) { void useUserStore.getState().hydrateUser(); void refreshHistory().catch(() => {}); }
             return next;
@@ -161,13 +167,21 @@ export function VideoEnhancePanel({ sourceVideoUrl = "", onCompleted }: Props) {
         const currentOwner = token, currentSession = session.current;
         pendingRequest.current ||= `client_video_task_enhance_${nanoid()}`;
         busyRef.current = true; activeTaskId.current = pendingRequest.current; setSubmitting(true); setStatusError("");
+        const clientTaskId = pendingRequest.current;
+        const submission: EnhanceSubmission = { clientTaskId, taskId: clientTaskId, channelId, resolution, frameRate, sourceDurationSeconds: duration || undefined };
+        const updateSubmission = onSubmittedRef.current, rejectSubmission = onRejectedRef.current;
+        activeSubmission.current = { input: submission, update: updateSubmission };
+        updateSubmission?.(submission);
         try {
-            const created = await createVideoEnhancement({ channelId, personal, url: source, resolution, frameRate, sourceDurationSeconds: duration || undefined, source: onCompleted ? "canvas" : "video-workbench", clientTaskId: pendingRequest.current });
+            const created = await createVideoEnhancement({ channelId, personal, url: source, resolution, frameRate, sourceDurationSeconds: duration || undefined, source: onSubmitted || onCompleted ? "canvas" : "video-workbench", clientTaskId });
+            if (useUserStore.getState().token === currentOwner) updateSubmission?.({ ...submission, taskId: created.id, task: created });
             if (owner.current === currentOwner && session.current === currentSession) { activeTaskId.current = created.id; submittedTask.current = created.id; pendingRequest.current = ""; setTask(created); }
         } catch (error) {
+            const status = (error as { response?: { status?: number }; code?: number })?.response?.status || Number((error as { code?: number })?.code);
+            const rejected = [400, 401, 403, 413, 415, 422].includes(status || 0);
+            if (rejected && useUserStore.getState().token === currentOwner) rejectSubmission?.(clientTaskId);
             if (owner.current === currentOwner && session.current === currentSession) {
-                const status = (error as { response?: { status?: number }; code?: number })?.response?.status || Number((error as { code?: number })?.code);
-                if ([400, 401, 403, 413, 415, 422].includes(status || 0)) {
+                if (rejected) {
                     pendingRequest.current = ""; activeTaskId.current = ""; setStatusError("");
                     message.error(errorText(error, "提交失败，请检查视频与所选参数"));
                 } else {

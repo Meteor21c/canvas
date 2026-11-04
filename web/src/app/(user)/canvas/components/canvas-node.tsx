@@ -506,7 +506,7 @@ function LoadingContent({ node, theme, now }: Pick<NodeContentRendererProps, "no
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
                     <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: selectionBlue }} />
                     <div className="text-sm font-semibold" style={{ color: selectionBlue }}>
-                        {stopLabel || `正在创作 ${progress}%`}
+                        {stopLabel || (node.metadata?.model === "tencent-mps-superres" ? node.metadata.errorDetails || `正在增强 ${progress}%` : `正在创作 ${progress}%`)}
                     </div>
                     <span className="rounded-full px-2 py-1 text-xs" style={{ background: theme.toolbar.panel, color: theme.node.text }}>
                         {formatDuration(elapsedMs)}
