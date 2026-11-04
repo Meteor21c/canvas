@@ -77,7 +77,7 @@ export function AppSideNav() {
                 </nav>
 
                 <div className="flex shrink-0 flex-col gap-3">
-                    {!compact ? <p className="flex gap-2 px-2 text-[11px] leading-5 text-foreground/45"><Clock3 className="mt-1 size-3 shrink-0" /><span>画布与素材保留 7 天<br />请及时导出并备份到本地</span></p> : null}
+                    {!compact ? <p className="flex gap-2 px-2 text-[11px] leading-5 text-foreground/45"><Clock3 className="mt-1 size-3 shrink-0" /><span>画布与普通素材保留 7 天<br />增强结果 24 小时，请及时保存</span></p> : null}
                     {wrap("返回流星 API", <a href="/" className={cn(itemClass, idleItemClass, compact && "justify-center px-0")} aria-label="返回流星 API"><ArrowLeft className="size-4 shrink-0" />{!compact ? <span>返回流星 API</span> : null}</a>)}
                     <div className={cn("rounded-2xl bg-card/80 p-2 shadow-[0_1px_2px_rgba(0,0,0,0.04)]", compact && "px-0")}>
                         {!compact && user ? <div className="mb-2 flex items-center justify-between gap-2 px-1"><span className="min-w-0 truncate text-xs font-medium text-foreground/75">{user.displayName || user.username}</span><span className="shrink-0 text-[11px] tabular-nums text-foreground/50">余额 {(user.balance ?? user.credits ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div> : null}

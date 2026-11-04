@@ -7,7 +7,7 @@ import { Megaphone, X } from "lucide-react";
 const ANNOUNCEMENTS = [
     <>
         <Megaphone />
-        画布自最近编辑起保留 7 天，图片与视频保留 7 天
+        画布自最近编辑起保留 7 天；普通素材 7 天，增强结果 24 小时
     </>,
     <>
         <Megaphone />
