@@ -41,3 +41,18 @@ func MeteorQuote(w http.ResponseWriter, r *http.Request) {
 	}
 	OK(w, value)
 }
+
+func MeteorVideoCostHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	user, ok := service.UserFromContext(r.Context())
+	if !service.MeteorEnabled() || !ok {
+		FailWithStatus(w, 403, "请先登录")
+		return
+	}
+	value, err := service.MeteorVideoCostHistory(r.Context(), user.ID, r.URL.Query().Get("channelId"), r.URL.Query().Get("model"))
+	if err != nil {
+		FailWithStatus(w, 400, "费用记录暂不可用，请稍后重试")
+		return
+	}
+	OK(w, value)
+}

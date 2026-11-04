@@ -51,6 +51,7 @@ func New() *gin.Engine {
 	v1 := api.Group("/v1", middleware.UserAuth)
 	v1.GET("/meteor/capabilities", gin.WrapF(handler.MeteorCapabilities))
 	v1.POST("/meteor/quote", gin.WrapF(handler.MeteorQuote))
+	v1.GET("/meteor/video-cost-history", gin.WrapF(handler.MeteorVideoCostHistory))
 	v1.POST("/meteor/download", gin.WrapF(handler.MeteorDownload))
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))

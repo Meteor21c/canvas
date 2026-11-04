@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { pricingInputFromConfig, type PricingSelection } from "@/lib/meteor-pricing";
-import { fetchMeteorCapabilities, fetchMeteorQuote } from "@/services/api/meteor-pricing";
+import { fetchMeteorCapabilities, fetchMeteorQuote, fetchMeteorVideoCostHistory } from "@/services/api/meteor-pricing";
 import { useUserStore } from "@/stores/use-user-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { MeteorQuoteInput, PricingKind } from "@/types/meteor-pricing";
@@ -53,4 +53,15 @@ export function useVideoCapabilities(config: AiConfig, model?: string, channelId
         ...query,
         data: query.data ? { ...query.data, supportsAudio: query.data.supportsAudio ?? query.data.scenarios.some(scenario => scenario.audio) } : undefined,
     };
+}
+
+export function useVideoCostHistory(input: { model: string; channelId: string }, enabled: boolean) {
+    const userId = useUserStore(state => state.user?.id);
+    const token = useUserStore(state => state.token);
+    return useQuery({
+        queryKey: ["meteor-pricing", userId || "signed-out", "cost-history", input],
+        queryFn: () => fetchMeteorVideoCostHistory(input, token || ""),
+        enabled: enabled && Boolean(userId && token && input.model && input.channelId),
+        staleTime: 15_000, gcTime: 60_000, retry: false,
+    });
 }

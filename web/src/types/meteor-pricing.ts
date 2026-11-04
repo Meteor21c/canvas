@@ -74,6 +74,10 @@ export type MeteorQuoteInput = {
 };
 
 export type MeteorQuote = {
+    estimateSource?: "personal" | "default" | "exact";
+    estimateSamples?: number;
+    estimateLow?: PriceValue;
+    estimateHigh?: PriceValue;
     frameRate?: number;
     surcharges?: PricingSurcharge[];
     estimatedSurchargeAmount?: PriceValue;
@@ -93,4 +97,21 @@ export type MeteorQuote = {
     exact: boolean;
     notice: string;
     imagePriceBySize?: Record<string, PriceValue>;
+};
+
+export type MeteorVideoCostRecord = {
+    createdAt: string;
+    resolution: string;
+    durationSeconds: number;
+    durationSource: "actual" | "requested" | "unknown";
+    currency: string;
+    aspectRatio?: string;
+    inputImageCount?: number;
+    inputVideoSeconds?: number;
+    audio?: boolean;
+    frameRate?: number;
+    sceneName: string;
+    outputTokens: number;
+    actualAmount: PriceValue;
+    averagePerSecond: PriceValue;
 };

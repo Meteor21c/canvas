@@ -54,6 +54,10 @@ type MeteorPrice struct {
 	ImagePriceBySize         map[string]*string `json:"imagePriceBySize,omitempty"`
 	Surcharges               []MeteorSurcharge  `json:"surcharges,omitempty"`
 	EstimatedSurchargeAmount *string            `json:"estimatedSurchargeAmount,omitempty"`
+	EstimateSource           string             `json:"estimateSource,omitempty"`
+	EstimateSamples          int                `json:"estimateSamples,omitempty"`
+	EstimateLow              *string            `json:"estimateLow,omitempty"`
+	EstimateHigh             *string            `json:"estimateHigh,omitempty"`
 }
 type MeteorSurcharge struct {
 	Code              string  `json:"code"`
@@ -466,6 +470,7 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 		return meteorGrokVideoQuote(ctx, userID, channel, input, quote)
 	}
 	query := url.Values{"model": {input.Model}, "resolution": {input.Resolution}, "duration": {strconv.Itoa(input.Duration)}, "audio": {strconv.FormatBool(input.Audio)}, "input_video": {strconv.FormatBool(input.InputVideo)}}
+	query.Set("aspect_ratio", input.Size)
 	if input.Model == "tencent-mps-superres" {
 		// Enhancement has no output-duration control. Omit unrelated zero values
 		// because the gateway validates every supplied estimate independently.
@@ -489,6 +494,11 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 		Precharge          json.RawMessage      `json:"precharge_amount"`
 		Surcharges         []meteorRawSurcharge `json:"surcharges"`
 		EstimatedSurcharge json.RawMessage      `json:"estimated_surcharge_amount"`
+		EstimatedAmount    json.RawMessage      `json:"estimated_amount"`
+		EstimateSource     string               `json:"estimate_source"`
+		EstimateSamples    int                  `json:"estimate_samples"`
+		EstimateLow        json.RawMessage      `json:"estimate_low"`
+		EstimateHigh       json.RawMessage      `json:"estimate_high"`
 	}
 	if err := meteorRawMain(ctx, channel, "/v1/videos/pricing?"+query.Encode(), &raw); err != nil {
 		return quote, nil
@@ -499,6 +509,13 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 	quote.PrechargeAmount = meteorDecimal(raw.Precharge)
 	quote.Surcharges = meteorSafeSurcharges(raw.Surcharges)
 	quote.EstimatedSurchargeAmount = meteorDecimal(raw.EstimatedSurcharge)
+	if raw.EstimateSource == "personal" || raw.EstimateSource == "default" || raw.EstimateSource == "exact" {
+		quote.EstimateSource = raw.EstimateSource
+		quote.EstimateSamples = max(0, min(200, raw.EstimateSamples))
+		quote.EstimatedAmount = meteorDecimal(raw.EstimatedAmount)
+		quote.EstimateLow = meteorDecimal(raw.EstimateLow)
+		quote.EstimateHigh = meteorDecimal(raw.EstimateHigh)
+	}
 	if raw.Mode == "second" {
 		quote.Unit = "second"
 		quote.SiteUnitPrice = meteorDecimal(raw.SaleSecond)

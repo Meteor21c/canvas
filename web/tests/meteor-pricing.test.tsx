@@ -5,6 +5,17 @@ import { formatOfficialRate, formatPrice, priceNumber, pricingInputFromConfig, p
 import { defaultConfig } from "../src/stores/use-config-store";
 import type { MeteorQuote } from "../src/types/meteor-pricing";
 
+test("personal reference can exceed the reservation cap without becoming a final price", () => {
+    const quote: MeteorQuote = { available: true, kind: "video", model: "video-model", channelId: "test", billingMode: "token", currency: "CNY", siteUnitPrice: "20", officialUnitPrice: null, saleRateToOfficial: null, estimatedAmount: "10", prechargeAmount: "5", exact: false, notice: "完成后按实际用量多退少补。", estimateSource: "personal", estimateSamples: 3, estimateLow: "9", estimateHigh: "11" };
+    const html = renderToStaticMarkup(<QuoteDetails quote={quote} duration={10} />);
+    expect(html).toContain("历史参考");
+    expect(html).toContain("¥9–¥11");
+    expect(html).toContain("¥5");
+    expect(html).toContain("3 次");
+    expect(html).toContain("完成后将补扣差额");
+    expect(html).not.toMatch(/1\.15|盈合|上游|当前参数价/);
+});
+
 test("unknown token cost never becomes a zero price or a per-image quote", () => {
     for (const input of [null, undefined, "", " ", "unknown", "NaN", "-1", "Infinity"]) {
         expect(priceNumber(input)).toBeNull();
