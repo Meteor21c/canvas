@@ -119,7 +119,7 @@ export function AssetBatchUpload({ size, onUploaded }: { size?: ButtonProps["siz
                 </div>}
             >
                 <div className="space-y-4 py-2">
-                    <Typography.Paragraph type="secondary" className="!mb-0">支持一次选择最多 20 张图片，单张不超过 20 MiB。素材保留 7 天，请及时导出并备份到本地。</Typography.Paragraph>
+                    <Typography.Paragraph type="secondary" className="!mb-0">支持一次选择最多 20 张图片，单张不超过 10 MB。素材保留 7 天，请及时导出并备份到本地。</Typography.Paragraph>
                     <Button icon={<Upload className="size-4" />} disabled={busy} onClick={() => fileInputRef.current?.click()}>{items.length ? "重新选择图片" : "选择图片（支持多选）"}</Button>
                     <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event) => { selectFiles(event.target.files); event.target.value = ""; }} />
                     {items.length ? <>

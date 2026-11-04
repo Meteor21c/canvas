@@ -313,6 +313,7 @@ function videoSyncKey(config: AiConfig, task: VideoResponse) {
 }
 
 async function syncGeneratedVideo(task: VideoResponse, config: AiConfig, contentResolved = false): Promise<VideoResponse> {
+    if (task.model === "tencent-mps-superres" || config.model === "tencent-mps-superres") return task;
     const url = task.video_url || task.url || "";
     if (task.storageKey || isFailedVideoStatus(task.status) || (!isCompletedVideoStatus(task.status) && !url)) return task;
     if (task.parameter_translation && !url) return cacheProtectedVideo(config, config.model || config.videoModel, task);
@@ -331,7 +332,7 @@ export async function listVideoGenerationTasks(config: AiConfig) {
     if (!usesAccountProxy(config)) return [];
     const payload = (await axios.get<ApiVideoEnvelope>("/studio/api/v1/video-tasks", { headers: aiHeaders(config) })).data;
     if (payload.code !== 0) throw new VideoRequestError(payload.msg || payload.message || "读取视频任务失败", payload);
-    return Array.isArray(payload.data) ? payload.data.map(normalizeVideoResponse) : [];
+    return Array.isArray(payload.data) ? payload.data.filter(task => task.model !== "tencent-mps-superres").map(normalizeVideoResponse) : [];
 }
 
 export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoResponse | null) {

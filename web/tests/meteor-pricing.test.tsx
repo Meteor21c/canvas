@@ -46,3 +46,26 @@ test("video shows explicit precharge separately from its final usage estimate", 
     expect(html).not.toContain("本次价格");
     expect(html).not.toMatch(/1\.15|盈合|上游/);
 });
+
+test("video enhancement keeps Token pricing and frame rate in the quote", () => {
+    const input = pricingInputFromConfig({ ...defaultConfig, videoModel: "tencent-mps-superres", videoChannelId: "enhance-channel", vquality: "480p" }, "video", { frameRate: 60, sourceDurationSeconds: 12 });
+    expect(input).toMatchObject({ model: "tencent-mps-superres", resolution: "1080p", frameRate: 60, sourceDurationSeconds: 12, count: 1 });
+    const quote: MeteorQuote = { available: true, kind: "video", model: "tencent-mps-superres", channelId: "enhance-channel", billingMode: "token", unit: "million_output_tokens", currency: "CNY", siteUnitPrice: "0.9150435", officialUnitPrice: "1.263", saleRateToOfficial: "0.7245", estimatedAmount: null, prechargeAmount: "0.2", exact: false, notice: "先预扣，完成后按实际用量多退少补。" };
+    const html = renderToStaticMarkup(<QuoteDetails quote={quote} resolution="1080p" />);
+    expect(html).toContain("百万输出 Token");
+    expect(html).toContain("¥0.2");
+    expect(html).not.toContain("/分钟");
+    expect(html).not.toMatch(/1\.15|盈合|上游/);
+});
+
+test("H3 shows chargeable image and input-video fees before submission", () => {
+    const input = pricingInputFromConfig({ ...defaultConfig, videoModel: "MiniMax-H3", videoChannelId: "h3-channel", vquality: "480p" }, "video", { inputImageCount: 8, inputVideoSeconds: 6 });
+    expect(input).toMatchObject({ resolution: "768p", inputImageCount: 8, inputVideoSeconds: 6 });
+    const quote: MeteorQuote = { available: true, kind: "video", model: "MiniMax-H3", channelId: "h3-channel", billingMode: "duration", unit: "second", currency: "CNY", siteUnitPrice: "0.48875", officialUnitPrice: "0.5", saleRateToOfficial: "0.9775", estimatedAmount: "5.865", prechargeAmount: "5.865", estimatedSurchargeAmount: "3.519", exact: false, notice: "先预扣，完成后按实际用量多退少补。", surcharges: [{ code: "input_image", freeUnits: 5, unit: "image", siteUnitPrice: "0.1955", officialUnitPrice: "0.2" }, { code: "input_video", freeUnits: 0, unit: "second", siteUnitPrice: "0.48875", officialUnitPrice: "0.5" }] };
+    const html = renderToStaticMarkup(<QuoteDetails quote={quote} duration={12} resolution="768p" />);
+    expect(html).toContain("前 5 张免费");
+    expect(html).toContain("¥0.1955 / 张");
+    expect(html).toContain("参考视频 ¥0.48875 / 秒");
+    expect(html).toContain("本次参考素材费用约 ¥3.519");
+    expect(html).not.toMatch(/1\.15|盈合|上游/);
+});

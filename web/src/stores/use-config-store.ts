@@ -253,6 +253,7 @@ function isVideoModelName(model: string) {
     const value = model.toLowerCase();
     return (
         value === "wan2.2animate-v4-motion_retargeting" ||
+        value === "tencent-mps-superres" ||
         value.includes("video") ||
         value.includes("seedance") ||
         value.includes("sora") ||

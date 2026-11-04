@@ -2,8 +2,11 @@ export type PricingKind = "image" | "video";
 export type PriceValue = string | null;
 export type PricingUnit = "million_output_tokens" | "second" | "image" | "request" | "unknown";
 export type TokenPrices = { inputPerMillion: PriceValue; cacheReadPerMillion: PriceValue; imageInputPerMillion: PriceValue; imageOutputPerMillion: PriceValue; outputPerMillion: PriceValue };
+export type PricingSurcharge = { code: string; metricKey?: string; freeUnits: number; unit: string; officialUnitPrice: PriceValue; siteUnitPrice: PriceValue };
 
 export type PricingScenario = {
+    frameRate?: number;
+    surcharges?: PricingSurcharge[];
     resolutions: string[];
     audio: boolean;
     inputVideo: boolean;
@@ -17,6 +20,9 @@ export type PricingScenario = {
 };
 
 export type MeteorCapabilities = {
+    operation?: "enhance";
+    frameRates?: number[];
+    retentionHours?: number;
     kind: PricingKind;
     model: string;
     channelId: string;
@@ -51,6 +57,10 @@ export type MeteorVideoInputPolicy = {
 };
 
 export type MeteorQuoteInput = {
+    frameRate?: number;
+    sourceDurationSeconds?: number;
+    inputVideoSeconds?: number;
+    inputImageCount?: number;
     kind: PricingKind;
     channelId: string;
     model: string;
@@ -64,6 +74,9 @@ export type MeteorQuoteInput = {
 };
 
 export type MeteorQuote = {
+    frameRate?: number;
+    surcharges?: PricingSurcharge[];
+    estimatedSurchargeAmount?: PriceValue;
     available: boolean;
     kind: PricingKind;
     model: string;

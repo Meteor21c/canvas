@@ -3,7 +3,7 @@ import { normalizeQuality, resolveRequestSize } from "@/services/api/image";
 import { imageSizeTier, normalizeImageResolution } from "@/lib/image-resolution";
 import type { MeteorQuoteInput, PriceValue, PricingKind, PricingUnit } from "@/types/meteor-pricing";
 
-export type PricingSelection = { model?: string; channelId?: string; count?: number; inputVideo?: boolean };
+export type PricingSelection = { model?: string; channelId?: string; count?: number; inputVideo?: boolean; inputVideoSeconds?: number; inputImageCount?: number; frameRate?: number; sourceDurationSeconds?: number };
 
 export function pricingInputFromConfig(config: AiConfig, kind: PricingKind, selection: PricingSelection = {}): MeteorQuoteInput {
     const model = selection.model ?? (kind === "image" ? config.imageModel : config.videoModel);
@@ -17,12 +17,13 @@ export function pricingInputFromConfig(config: AiConfig, kind: PricingKind, sele
     return {
         kind, model, channelId,
         count: kind === "video" ? 1 : Number.isInteger(count) && count > 0 ? count : 1,
-        resolution: kind === "video" ? videoResolution : imageResolution,
+        resolution: kind === "video" ? model === "tencent-mps-superres" && !["720p", "1080p", "2k", "4k"].includes(videoResolution) ? "1080p" : model === "MiniMax-H3" && !["768p", "2k"].includes(videoResolution) ? "768p" : videoResolution : imageResolution,
         quality: normalizeQuality(config.quality),
         size: kind === "image" ? actualImageSize || "auto" : config.size,
         ...(kind === "video" && Number.isInteger(duration) && duration > 0 ? { duration } : {}),
         audio: kind === "video" && config.videoGenerateAudio === "true",
         inputVideo: kind === "video" && selection.inputVideo === true,
+        ...(kind === "video" ? { frameRate: selection.frameRate ?? (model === "tencent-mps-superres" ? 30 : undefined), sourceDurationSeconds: selection.sourceDurationSeconds, inputVideoSeconds: selection.inputVideoSeconds, inputImageCount: selection.inputImageCount } : {}),
     };
 }
 

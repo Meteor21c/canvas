@@ -36,6 +36,8 @@ import { nanoid } from "nanoid";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
 import { PriceSummary } from "@/components/pricing/price-summary";
+import { VideoEnhancePanel } from "@/components/video/video-enhance-dialog";
+import { VIDEO_ENHANCE_MODEL } from "@/services/api/video-enhance";
 import { useVideoCapabilities } from "@/hooks/use-meteor-pricing";
 import { assertReferenceFileSize, inspectReferenceFile, referenceAccept, REFERENCE_UPLOAD_NOTICE, videoInputError } from "@/lib/meteor-video-input";
 import { fetchMeteorCapabilities } from "@/services/api/meteor-pricing";
@@ -158,6 +160,11 @@ type VideoTaskRun = { id: string; controller: AbortController; backend?: Generat
 const WORKBENCH_LAYOUT_KEY = "infinite-canvas:video-workbench-layout";
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 export default function VideoPage() {
+    const [tab, setTab] = useState("generate");
+    return <div className="flex h-full min-h-0 flex-col bg-background"><div className="flex shrink-0 gap-1 border-b border-border px-4 py-2">{[{ key: "generate", label: "视频生成" }, { key: "enhance", label: "视频增强" }].map(item => <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => setTab(item.key)} className={`rounded-lg px-4 py-2 text-sm ${tab === item.key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"}`}>{item.label}</button>)}</div><div className={`min-h-0 flex-1 ${tab === "generate" ? "" : "hidden"}`}><VideoGenerationPage /></div><div className={`min-h-0 flex-1 overflow-auto p-3 sm:p-6 ${tab === "enhance" ? "" : "hidden"}`}><VideoEnhancePanel /></div></div>;
+}
+
+function VideoGenerationPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const elementFileInputRef = useRef<HTMLInputElement>(null);
@@ -165,7 +172,7 @@ export default function VideoPage() {
     const lastFrameInputRef = useRef<HTMLInputElement>(null);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const videoConfig = useMemo(() => ({ ...effectiveConfig, activeChannelId: effectiveConfig.videoChannelId || effectiveConfig.activeChannelId, size: effectiveConfig.videoSize }), [effectiveConfig]);
+    const videoConfig = useMemo(() => ({ ...effectiveConfig, activeChannelId: effectiveConfig.videoChannelId || effectiveConfig.activeChannelId, size: effectiveConfig.videoSize, publicChannels: effectiveConfig.publicChannels.map(channel => ({ ...channel, models: channel.models?.filter(model => model !== VIDEO_ENHANCE_MODEL) })), localChannels: effectiveConfig.localChannels.map(channel => ({ ...channel, models: channel.models.filter(model => model !== VIDEO_ENHANCE_MODEL) })) }), [effectiveConfig]);
     const updateVideoConfig = useCallback<UpdateAiConfig>(
         (key, value) => {
             if (key === "size") {
@@ -1866,7 +1873,7 @@ function WorkbenchPanel({
                         ) : null}
                         <p className="text-xs text-stone-500">{materialError || REFERENCE_UPLOAD_NOTICE}</p>
                         <div className="flex flex-col gap-3 border-t border-stone-200/70 pt-3 sm:flex-row sm:items-end sm:justify-between dark:border-stone-800">
-                            <PriceSummary config={config} capability="video" model={model} inputVideo={videoReferences.length > 0} compact className="min-w-0 flex-1" />
+                            <PriceSummary config={config} capability="video" model={model} inputVideo={videoReferences.length > 0} inputImageCount={references.length + Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))} inputVideoSeconds={videoReferences.reduce((sum, item) => sum + (item.durationMs || 0) / 1000, 0)} compact className="min-w-0 flex-1" />
                             <Button type="primary" className="h-11 min-w-28 shrink-0 rounded-xl" icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                                 {pendingCount ? `${pendingCount} 生成中` : "开始创作"}
                             </Button>
@@ -1955,14 +1962,14 @@ function WorkbenchPanel({
                         <ReferenceAudioStrip references={audioReferences} maxCount={referenceLimits.audios} onRemoveReference={onRemoveAudioReference} onMoveReference={onMoveAudioReference} />
                     </div>
                 </WorkbenchSection>) : null}
-                <p className="text-xs leading-5 text-stone-500">{REFERENCE_UPLOAD_NOTICE} · 每次最多4个素材 · 保留7天</p>
+                <p className="text-xs leading-5 text-stone-500">{REFERENCE_UPLOAD_NOTICE} · 素材保留7天</p>
                 {inputPolicy ? <p className="text-xs text-stone-500">首尾帧与参考素材分开使用{inputPolicy.referenceDuration ? "；参考视频、音频 " + inputPolicy.referenceDuration.min + "–" + inputPolicy.referenceDuration.max + " 秒" : ""}</p> : null}
                 {materialError ? <p role="alert" className="text-xs text-red-600">{materialError}</p> : null}
                 {motionControl ? <CharacterOrientationSetting value={config.videoCharacterOrientation} onChange={(value) => updateConfig("videoCharacterOrientation", value)} /> : null}
                 <GenerationSettings config={config} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
             </div>
             <div className="shrink-0 border-t border-stone-200 p-4 dark:border-stone-800">
-                <PriceSummary config={config} capability="video" model={model} inputVideo={videoReferences.length > 0} className="mb-3" />
+                <PriceSummary config={config} capability="video" model={model} inputVideo={videoReferences.length > 0} inputImageCount={references.length + Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))} inputVideoSeconds={videoReferences.reduce((sum, item) => sum + (item.durationMs || 0) / 1000, 0)} className="mb-3" />
                 <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} disabled={!canGenerate} onClick={onGenerate}>
                     {pendingCount ? `生成中（${pendingCount}）` : "开始生成"}
                 </Button>

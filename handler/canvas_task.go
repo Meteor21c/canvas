@@ -55,9 +55,9 @@ func StopCanvasTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func CreateCanvasImageTask(w http.ResponseWriter, r *http.Request) {
-	release, available := service.TryMeteorGeneration()
+	release, available := tryAIRequestGeneration(r)
 	if !available {
-		FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+		FailWithStatus(w, 429, "生成请求正在处理，请稍后再试")
 		return
 	}
 	asyncStarted := false
@@ -208,9 +208,9 @@ func DeleteUserCanvasImageTask(w http.ResponseWriter, r *http.Request, id string
 }
 
 func CreateCanvasAudioTask(w http.ResponseWriter, r *http.Request) {
-	release, available := service.TryMeteorGeneration()
+	release, available := tryAIRequestGeneration(r)
 	if !available {
-		FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+		FailWithStatus(w, 429, "生成请求正在处理，请稍后再试")
 		return
 	}
 	asyncStarted := false
@@ -455,6 +455,7 @@ func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []
 func executeCanvasAIRequest(ctx context.Context, user model.AuthUser, endpoint string, body []byte, contentType string, channelID string, userChannelID string, onProgress ...func(int)) ([]byte, int, string, error) {
 	request := httptest.NewRequest(http.MethodPost, "http://canvas.local/api/v1"+endpoint, bytes.NewReader(body))
 	request = request.WithContext(service.WithUser(ctx, user))
+	request = request.WithContext(context.WithValue(request.Context(), canvasAIRequestBodyKey{}, body))
 	request.Header.Set("X-Canvas-Node-Request", "true")
 	if len(onProgress) > 0 {
 		request = request.WithContext(context.WithValue(request.Context(), parameterTranslationProgressKey{}, onProgress[0]))
@@ -502,20 +503,17 @@ func saveFailedCanvasAudioTask(task model.CanvasAudioTask, message string, detai
 
 func readCanvasTaskAIRequest(r *http.Request, fallbackEndpoint string) ([]byte, string, string, string, string, string, string, string, string, error) {
 	contentType := r.Header.Get("Content-Type")
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (32<<20)+1))
-	if service.MeteorEnabled() && len(raw) > 32<<20 {
-		return nil, "", "", "", "", "", "", "", "", errors.New("请求不能超过32 MiB")
-	}
-	if err != nil {
-		return nil, "", "", "", "", "", "", "", "", err
-	}
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		body, cleanedContentType, meta, err := stripCanvasTaskMultipartFields(raw, contentType, strings.HasPrefix(fallbackEndpoint, "/images/"))
+		body, cleanedContentType, meta, err := readCanvasTaskMultipartFields(r.Body, contentType, r.ContentLength, strings.HasPrefix(fallbackEndpoint, "/images/"))
 		if err != nil {
 			return nil, "", "", "", "", "", "", "", "", err
 		}
 		endpoint := firstNonEmpty(meta["_canvas_endpoint"], fallbackEndpoint)
 		return body, cleanedContentType, endpoint, meta["_canvas_source"], meta["_canvas_node_id"], meta["_canvas_source_id"], meta["_canvas_task_id"], meta["_canvas_prompt"], meta["_canvas_channel_id"], nil
+	}
+	raw, err := readBoundedAIRequestBody(r.Body, r.ContentLength, meteorAIJSONMaxBytes)
+	if err != nil {
+		return nil, "", "", "", "", "", "", "", "", err
 	}
 	var wrapper struct {
 		Endpoint     string          `json:"endpoint"`
@@ -544,36 +542,92 @@ func readCanvasTaskAIRequest(r *http.Request, fallbackEndpoint string) ([]byte, 
 }
 
 func stripCanvasTaskMultipartFields(raw []byte, contentType string, normalizeImages bool) ([]byte, string, map[string]string, error) {
+	return readCanvasTaskMultipartFields(bytes.NewReader(raw), contentType, int64(len(raw)), normalizeImages)
+}
+
+func readCanvasTaskMultipartFields(source io.Reader, contentType string, contentLength int64, normalizeImages bool) ([]byte, string, map[string]string, error) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	form, err := multipart.NewReader(bytes.NewReader(raw), params["boundary"]).ReadForm(256 << 20)
-	if err != nil {
-		return nil, "", nil, err
+	if params["boundary"] == "" {
+		return nil, "", nil, errors.New("缺少素材上传边界")
 	}
-	defer form.RemoveAll()
+	meteor := service.MeteorEnabled()
+	if meteor && contentLength > meteorAIMultipartMaxBytes {
+		return nil, "", nil, errors.New("参考素材总大小不能超过100 MiB")
+	}
 	var buffer bytes.Buffer
+	if contentLength > 0 && contentLength <= meteorAIMultipartMaxBytes {
+		buffer.Grow(int(contentLength))
+	} else if meteor {
+		buffer.Grow(int(meteorAIMultipartMaxBytes))
+	}
+	var wire *io.LimitedReader
+	if meteor {
+		wire = &io.LimitedReader{R: source, N: meteorAIMultipartMaxBytes + 1}
+		source = wire
+	}
+	reader := multipart.NewReader(source, params["boundary"])
 	writer := multipart.NewWriter(&buffer)
 	meta := map[string]string{}
-	for key, values := range form.Value {
-		if strings.HasPrefix(key, "_canvas_") {
-			if len(values) > 0 {
-				meta[key] = values[0]
-			}
-			continue
+	var fileBytes, fieldBytes int64
+	references, parts := 0, 0
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
 		}
-		for _, value := range values {
-			_ = writer.WriteField(key, value)
+		if err != nil {
+			return nil, "", nil, err
 		}
-	}
-	for key, files := range form.File {
-		for _, header := range files {
-			if err := writeCanvasTaskMultipartFile(writer, key, header, normalizeImages); err != nil {
-				_ = writer.Close()
+		parts++
+		key := part.FormName()
+		if meteor && (parts > 128 || len(key) > 256 || len(part.FileName()) > 1024) {
+			return nil, "", nil, errors.New("素材上传字段过多或名称过长")
+		}
+		if part.FileName() == "" {
+			value, err := readMultipartTextField(part)
+			if err != nil {
 				return nil, "", nil, err
 			}
+			fieldBytes += int64(len(value))
+			if meteor && fieldBytes > meteorAIFieldTotalMaxBytes {
+				return nil, "", nil, errors.New("上传文本字段总大小不能超过1 MiB")
+			}
+			if strings.HasPrefix(key, "_canvas_") {
+				if _, exists := meta[key]; !exists {
+					meta[key] = value
+				}
+			} else if err := writer.WriteField(key, value); err != nil {
+				return nil, "", nil, err
+			}
+		} else {
+			if key != "mask" {
+				references++
+			}
+			if meteor && references > 10 {
+				return nil, "", nil, errors.New("参考图片最多10张")
+			}
+			limit := int64(0)
+			if meteor {
+				limit = service.MeteorReferenceMaxBytes - fileBytes
+				if normalizeImages && limit > service.MeteorImageMaxBytes {
+					limit = service.MeteorImageMaxBytes
+				}
+			}
+			written, err := writeCanvasTaskMultipartFile(writer, key, part.FileName(), part, normalizeImages, limit, meteor)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			fileBytes += written
 		}
+		if meteor && (buffer.Len() > int(meteorAIMultipartMaxBytes) || wire.N <= 0) {
+			return nil, "", nil, errors.New("参考素材总大小不能超过100 MiB")
+		}
+	}
+	if meteor && wire.N <= 0 {
+		return nil, "", nil, errors.New("参考素材总大小不能超过100 MiB")
 	}
 	if err := writer.Close(); err != nil {
 		return nil, "", nil, err
@@ -581,25 +635,21 @@ func stripCanvasTaskMultipartFields(raw []byte, contentType string, normalizeIma
 	return buffer.Bytes(), writer.FormDataContentType(), meta, nil
 }
 
-func writeCanvasTaskMultipartFile(writer *multipart.Writer, field string, header *multipart.FileHeader, normalizeImage bool) error {
-	file, err := header.Open()
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	reader := io.Reader(file)
+func writeCanvasTaskMultipartFile(writer *multipart.Writer, field, filename string, source io.Reader, normalizeImage bool, limit int64, bounded bool) (int64, error) {
+	reader := source
 	mimeType, extension := "", ""
 	if normalizeImage {
-		buffered := bufio.NewReaderSize(file, 512)
+		buffered := bufio.NewReaderSize(source, 512)
 		head, _ := buffered.Peek(512)
 		mimeType, extension = canvasTaskImageType(head)
 		reader = buffered
 	}
 	var part io.Writer
+	var err error
 	if mimeType == "" {
-		part, err = writer.CreateFormFile(field, header.Filename)
+		part, err = writer.CreateFormFile(field, filename)
 	} else {
-		filename := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+		filename = strings.TrimSuffix(filename, filepath.Ext(filename))
 		if filename == "" {
 			filename = "reference"
 		}
@@ -609,10 +659,19 @@ func writeCanvasTaskMultipartFile(writer *multipart.Writer, field string, header
 		part, err = writer.CreatePart(partHeader)
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = io.Copy(part, reader)
-	return err
+	if bounded {
+		reader = io.LimitReader(reader, limit+1)
+	}
+	written, err := io.Copy(part, reader)
+	if bounded && written > limit {
+		if normalizeImage && limit == service.MeteorImageMaxBytes {
+			return 0, errors.New("单张参考图片不能超过10 MiB")
+		}
+		return 0, errors.New("参考素材总大小不能超过100 MiB")
+	}
+	return written, err
 }
 
 func canvasTaskImageType(data []byte) (string, string) {

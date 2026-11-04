@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Sparkles, Square, Trash2, Upload, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -25,6 +25,8 @@ type CanvasNodeHoverToolbarProps = {
     onGenerateImage: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
     onExtractAudio: (node: CanvasNodeData) => void;
+    onEnhanceVideo: (node: CanvasNodeData) => void;
+    onStop: (nodeId: string) => void;
     onTrimAudio: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
@@ -51,6 +53,7 @@ type ToolbarTool = {
     onClick: () => void;
     active?: boolean;
     danger?: boolean;
+    disabled?: boolean;
 };
 
 export function CanvasNodeHoverToolbar({
@@ -65,6 +68,8 @@ export function CanvasNodeHoverToolbar({
     onGenerateImage,
     onUpload,
     onExtractAudio,
+    onEnhanceVideo,
+    onStop,
     onTrimAudio,
     onDownload,
     onSaveAsset,
@@ -89,6 +94,9 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
+    const [clock, setClock] = useState(Date.now());
+    const toolbarRef = useRef<HTMLDivElement>(null);
+    const [bounds, setBounds] = useState({ width: 0, height: 0, parentWidth: 0, parentHeight: 0 });
     const { message } = App.useApp();
     const copyText = useCopyText();
     const isPanorama = isPanoramaNodeType(node?.type);
@@ -122,20 +130,48 @@ export function CanvasNodeHoverToolbar({
         setImageToolSettingsOpen(false);
     }, [node?.id]);
 
+    useEffect(() => {
+        setClock(Date.now());
+        const expiresAt = node?.metadata?.videoEnhancementExpiresAt;
+        if (!expiresAt || expiresAt <= Date.now()) return;
+        const timer = setTimeout(() => setClock(Date.now()), Math.min(expiresAt - Date.now() + 1, 2147483647));
+        return () => clearTimeout(timer);
+    }, [node?.id, node?.metadata?.videoEnhancementExpiresAt]);
+
+    useLayoutEffect(() => {
+        const element = toolbarRef.current;
+        const parent = element?.parentElement;
+        if (!element || !parent) return;
+        const measure = () => {
+            const next = { width: element.offsetWidth, height: element.offsetHeight, parentWidth: parent.clientWidth, parentHeight: parent.clientHeight };
+            setBounds((current) => Object.keys(next).every((key) => current[key as keyof typeof current] === next[key as keyof typeof next]) ? current : next);
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        observer.observe(parent);
+        return () => observer.disconnect();
+    }, [node?.id]);
+
     if (!node) return null;
 
-    const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 14;
+    const anchorLeft = viewport.x + (node.position.x + node.width / 2) * viewport.k;
+    const anchorTop = viewport.y + node.position.y * viewport.k - 14;
+    const left = bounds.parentWidth ? Math.max(bounds.width / 2 + 8, Math.min(anchorLeft, bounds.parentWidth - bounds.width / 2 - 8)) : anchorLeft;
+    const placeBelow = bounds.height > 0 && anchorTop - bounds.height < 8;
+    const top = placeBelow ? Math.max(8, Math.min(viewport.y + (node.position.y + node.height) * viewport.k + 14, bounds.parentHeight - bounds.height - 8)) : anchorTop;
     const isImage = isCanvasImageNodeType(node.type);
     const isVideo = node.type === CanvasNodeType.Video;
+    const isEnhancement = isVideo && node.metadata?.model === "tencent-mps-superres";
+    const enhancementExpired = isEnhancement && Boolean(node.metadata?.videoEnhancementExpiresAt && clock >= node.metadata.videoEnhancementExpiresAt);
     const isAudio = node.type === CanvasNodeType.Audio;
     const hasImage = isImage && Boolean(node.metadata?.content);
-    const hasVideo = isVideo && Boolean(node.metadata?.content);
+    const hasVideo = isVideo && !enhancementExpired && Boolean(node.metadata?.content);
     const hasAudio = isAudio && Boolean(node.metadata?.content);
     const isText = node.type === CanvasNodeType.Text;
     const isConfig = node.type === CanvasNodeType.Config;
-    const canOpenDialog = isText || hasImage || isVideo;
-    const canRetry = node.metadata?.status === "error";
+    const canOpenDialog = isText || hasImage || (isVideo && !isEnhancement);
+    const canRetry = !isEnhancement && node.metadata?.status === "error";
     const quickImageToolIdSet = new Set(quickImageToolIds);
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = (isPanoramaNodeType(target.type) ? target.metadata?.panoramaSourcePrompt : target.metadata?.prompt)?.trim();
@@ -159,10 +195,18 @@ export function CanvasNodeHoverToolbar({
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
     ];
     const nodeToolbarTools: ToolbarTool[] = [
+        ...(isVideo && node.metadata?.clientTaskId && ["loading", "stopping"].includes(node.metadata?.status || "") ? [{ id: "stop", title: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止生成", label: node.metadata.status === "stopping" ? node.metadata.errorDetails ? "重试停止" : "停止中" : "停止", icon: <Square className="size-4" />, disabled: node.metadata.status === "stopping" && !node.metadata.errorDetails, onClick: () => onStop(node.id) }] : []),
         ...(canRetry ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
-        ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
-        ...((hasVideo || hasAudio) && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadMediaToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadMediaToCloud(node) }] : []),
+        ...(!isEnhancement && (hasImage || hasVideo || isText) ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
+        ...(!isEnhancement && (hasVideo || hasAudio) && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadMediaToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadMediaToCloud(node) }] : []),
         ...(hasImage && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadImageToCloud", title: "上传至云存储", label: "上传至云存储", icon: <Upload className="size-4" />, onClick: () => onUploadImageToCloud(node) }] : []),
+        ...(hasVideo && !isEnhancement ? [{
+            id: "enhanceVideo",
+            title: "增强画质",
+            label: "增强画质",
+            icon: <Sparkles className="size-4" />,
+            onClick: () => onEnhanceVideo(node),
+        }] : []),
         ...(hasVideo ? [{
             id: "extractAudio",
             title: "分离音频",
@@ -178,13 +222,13 @@ export function CanvasNodeHoverToolbar({
             onClick: () => onTrimAudio(node),
         }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
-        ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
+        ...(canOpenDialog && (!isVideo || !["loading", "stopping"].includes(node.metadata?.status || "")) ? [{ id: "edit", title: hasVideo ? "再次生成" : "编辑", label: hasVideo ? "再次生成" : "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
         ...(isImage && !isPanorama && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
-        ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
+        ...(isVideo && !isEnhancement ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
@@ -223,8 +267,9 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex flex-wrap -translate-x-1/2 -translate-y-full items-center justify-center gap-x-2 overflow-visible rounded-xl border border-white/10 bg-[#242424] px-2 text-[13px] text-[#f3f3f3] shadow-[0_8px_28px_rgba(0,0,0,.28)]"
-                style={{ left, top, maxWidth: "min(800px, calc(100vw - 32px))" }}
+                ref={toolbarRef}
+                className={`absolute z-[70] flex flex-wrap -translate-x-1/2 ${placeBelow ? "" : "-translate-y-full"} items-center justify-center gap-x-2 overflow-visible rounded-xl border border-white/10 bg-[#242424] px-2 text-[13px] text-[#f3f3f3] shadow-[0_8px_28px_rgba(0,0,0,.28)]`}
+                style={{ left, top, maxWidth: bounds.parentWidth ? Math.max(32, Math.min(800, bounds.parentWidth - 16)) : "min(800px, calc(100vw - 32px))" }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
@@ -306,6 +351,13 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                             <InfoRow label="状态" value={node.metadata?.status || "idle"} />
                             {batchCount > 1 ? <InfoRow label="图片组" value={`${batchCount} 张`} /> : null}
                             {(isPanoramaNodeType(node.type) ? node.metadata?.panoramaSourcePrompt : node.metadata?.prompt) ? <InfoRow label="提示词" value={isPanoramaNodeType(node.type) ? node.metadata?.panoramaSourcePrompt : node.metadata?.prompt} /> : null}
+                            {node.metadata?.model ? <InfoRow label="模型" value={node.metadata.model} /> : null}
+                            {node.type === CanvasNodeType.Video && node.metadata?.vquality ? <InfoRow label="清晰度" value={node.metadata.vquality} /> : null}
+                            {node.type === CanvasNodeType.Video && (node.metadata?.seconds || node.metadata?.durationMs) ? <InfoRow label="时长" value={`${node.metadata.seconds || Number(((node.metadata.durationMs || 0) / 1000).toFixed(2))} 秒`} /> : null}
+                            {node.type === CanvasNodeType.Video && node.metadata?.size ? <InfoRow label="画面比例" value={node.metadata.size} /> : null}
+                            {node.metadata?.videoEnhancementFrameRate ? <InfoRow label="帧率档位" value={`${node.metadata.videoEnhancementFrameRate} FPS`} /> : null}
+                            {node.metadata?.videoEnhancementExpiresAt ? <InfoRow label="下载截止" value={new Date(node.metadata.videoEnhancementExpiresAt).toLocaleString("zh-CN")} /> : null}
+                            {node.metadata?.naturalWidth && node.metadata?.naturalHeight ? <InfoRow label="原始尺寸" value={`${node.metadata.naturalWidth} × ${node.metadata.naturalHeight}`} /> : null}
                             {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
                             {node.metadata?.errorDetails ? (
                                 <div className="rounded-lg border p-3 text-red-400" style={{ borderColor: theme.node.stroke }}>
@@ -324,11 +376,11 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     );
 }
 
-function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
+function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false, disabled = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff">
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
+            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${danger ? "text-[#ef4444]" : ""}`} disabled={disabled} onClick={onClick} aria-label={title}>
                 <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-white/10 ${active ? "bg-white/10" : ""}`}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}

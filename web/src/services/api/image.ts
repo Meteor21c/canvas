@@ -1299,7 +1299,7 @@ async function createGeminiImageBody(config: AiConfig, prompt: string, reference
         model: config.model,
         ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
         contents: [{ role: "user", parts }],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"], responseFormat: { image } },
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: image },
     };
 }
 
@@ -1568,7 +1568,7 @@ export async function deleteCanvasImageTask(config: AiConfig, task?: CanvasImage
 }
 
 function assertCustomerImageLimits(config: AiConfig & { seedCount?: number }, references: ReferenceImage[]) {
-    if (references.length > 4) throw new ImageRequestError("参考图最多 4 张，请移除多余图片后重试");
+    if (references.length > 10) throw new ImageRequestError("参考图最多 10 张，请移除多余图片后重试");
     const count = Number(config.count || 1), batch = config.seedCount ?? count;
     if (!Number.isInteger(count) || count < 1 || count > 4 || !Number.isInteger(batch) || batch < 1 || batch > 4) throw new ImageRequestError("每次最多生成 4 张图片");
 }

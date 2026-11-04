@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, LoaderCircle, Maximize2, Square } from "lucide-react";
+import { ArrowUp, LoaderCircle, Maximize2, Square, X } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -38,6 +38,7 @@ type CanvasNodePromptPanelProps = {
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
     onStop: (nodeId: string) => void;
+    onClose?: () => void;
     mentionReferences?: CanvasResourceReference[];
     connectedNodes?: CanvasNodeData[];
     onDisconnectReference?: (fromNodeId: string, toNodeId: string) => void;
@@ -48,7 +49,7 @@ type CanvasNodePromptPanelProps = {
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onAddReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, onClose, mentionReferences = [], connectedNodes = [], videoFrameOptions = [], videoResourceOptions = [], onDisconnectReference, onStartReferenceSelection, onAddReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -62,6 +63,9 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
     const selectableMentions = referenceKinds ? mentionReferences.filter((reference) => referenceKinds.includes(reference.kind)) : mentionReferences;
     const selectableFrames = siteVideo && !videoInput?.modes.includes("frames") ? [] : videoFrameOptions;
     const selectableResources = siteVideo ? videoResourceOptions.filter((resource) => resource.kind === "text" || Boolean(videoInput?.modes.includes("reference") && videoInput.referenceTypes.includes(resource.kind))) : videoResourceOptions;
+    const frameNodeIds = [node.metadata?.firstFrameNodeId, node.metadata?.lastFrameNodeId].filter((id): id is string => Boolean(id));
+    const inputImageCount = connectedNodes.filter((item) => isCanvasImageNodeType(item.type) && item.metadata?.content && !frameNodeIds.includes(item.id)).length + frameNodeIds.length;
+    const inputVideoSeconds = connectedNodes.filter((item) => item.type === CanvasNodeType.Video).reduce((total, item) => total + Math.max(0, Number(item.metadata?.seconds) || (item.metadata?.durationMs || 0) / 1000), 0);
     const startReferenceSelection = (nodeId: string) => onStartReferenceSelection?.(nodeId, referenceKinds);
     const incompatibleFrames = Boolean(siteVideo && videoInput && ((node.metadata?.firstFrameNodeId && (!videoInput.modes.includes("frames") || !videoInput.firstFrame)) || (node.metadata?.lastFrameNodeId && (!videoInput.modes.includes("frames") || !videoInput.lastFrame || (videoInput.lastFrameRequiresFirst && !node.metadata.firstFrameNodeId)))));
     const { data: autodlWorkflow } = useAutoDLWorkflow(config, mode === "video" ? config.model : "");
@@ -151,6 +155,7 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            {onClose ? <div className="mb-2 flex items-center justify-between gap-2"><span className="text-xs font-medium opacity-70">{mode === "video" ? node.metadata?.content ? "再次生成视频" : "视频生成" : "生成设置"}</span><button type="button" className="grid size-7 place-items-center rounded-full transition hover:opacity-65" onClick={onClose} aria-label="关闭生成面板"><X className="size-4" /></button></div> : null}
             <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={startReferenceSelection} onAddReference={(nodeId, source) => onAddReference?.(nodeId, source, referenceKinds)} canUpload={!referenceKinds || referenceKinds.some((kind) => kind !== "text")} />
             {siteVideo ? <p className="mb-2 text-[10px] leading-4 opacity-60">{REFERENCE_UPLOAD_NOTICE} · 素材保留7天</p> : null}
             {incompatibleFrames ? <p className="mb-2 text-xs leading-4 text-amber-600 dark:text-amber-400">已保留原首尾帧选择；当前模型不支持该组合，请在视频设置中调整或明确移除后再生成。</p> : null}
@@ -221,7 +226,7 @@ export function CanvasNodePromptPanel({ node, viewport, isRunning, onPromptChang
                 </Button>
                 </div>
             </div>
-            {mode === "image" || mode === "video" ? <div className="mt-3 border-t border-stone-200/70 pt-3 dark:border-stone-700/70"><PriceSummary config={config} capability={mode} model={config.model} inputVideo={connectedNodes.some(item => item.type === CanvasNodeType.Video)} compact /></div> : null}
+            {mode === "image" || mode === "video" ? <div className="mt-3 border-t border-stone-200/70 pt-3 dark:border-stone-700/70"><PriceSummary config={config} capability={mode} model={config.model} inputVideo={connectedNodes.some(item => item.type === CanvasNodeType.Video)} inputImageCount={inputImageCount} inputVideoSeconds={inputVideoSeconds} compact /></div> : null}
             <Modal title="编辑提示词" open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
                     <CanvasNodeReferenceBar nodeId={node.id} connectedNodes={connectedNodes} onDisconnect={onDisconnectReference} onStartSelection={(nodeId) => { setExpanded(false); startReferenceSelection(nodeId); }} onAddReference={(nodeId, source) => { setExpanded(false); onAddReference?.(nodeId, source, referenceKinds); }} canUpload={!referenceKinds || referenceKinds.some((kind) => kind !== "text")} />

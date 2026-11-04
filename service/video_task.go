@@ -161,6 +161,9 @@ func DeleteUserVideoTask(userID string, id string) error {
 }
 
 func VideoTaskResponse(task model.VideoTask) map[string]any {
+	if MeteorEnabled() && task.Model == "tencent-mps-superres" && IsCompletedVideoTaskStatus(task.Status) && meteorVideoExpired(task) {
+		task.Status, task.VideoURL, task.Error = "expired", "", "增强视频已超过24小时，请及时下载保存。"
+	}
 	if MeteorEnabled() && IsCompletedVideoTaskStatus(task.Status) {
 		task.VideoURL = MeteorVideoURL(task.ID)
 	}
@@ -194,8 +197,11 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 		result["data"] = []map[string]any{{"url": task.VideoURL}}
 	}
 	if MeteorEnabled() && task.CompletedAt != "" {
-		result["expiresAt"] = MeteorExpiry(task.CompletedAt)
+		result["expiresAt"] = MeteorVideoExpiry(task)
 		result["retentionDays"] = 7
+		if task.Model == "tencent-mps-superres" {
+			result["retentionDays"], result["retentionHours"], result["operation"] = 1, 24, "enhance"
+		}
 	}
 	if task.WorkflowRef != "" {
 		result["workflowRef"] = task.WorkflowRef

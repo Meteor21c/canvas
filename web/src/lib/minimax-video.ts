@@ -11,7 +11,7 @@ export function isMiniMaxChannel(channel?: { protocol?: string }) {
 export function isMiniMaxH3Config(config: AiConfig, modelName: string) {
     const model = modelName.trim();
     return model.toLowerCase() === "minimax-h3"
-        && channelProtocolForConfig({ ...config, model, videoModel: model }) === MINIMAX_CHANNEL_PROTOCOL;
+        && [MINIMAX_CHANNEL_PROTOCOL, "sub2api"].includes(channelProtocolForConfig({ ...config, model, videoModel: model }));
 }
 
 export function normalizeMiniMaxH3Resolution(value: string) {

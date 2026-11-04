@@ -10,7 +10,7 @@ import (
 
 // These byte budgets protect this site's memory/disk; they are not provider limits.
 const (
-	MeteorImageMaxBytes     int64 = 20 << 20
+	MeteorImageMaxBytes     int64 = 10 << 20
 	MeteorVideoMaxBytes     int64 = 50 << 20
 	MeteorAudioMaxBytes     int64 = 20 << 20
 	MeteorReferenceMaxBytes int64 = 100 << 20
@@ -49,20 +49,31 @@ func meteorUploadsPolicy() *MeteorUploadPolicy {
 }
 
 func meteorVideoInputPolicy(modelName string) *MeteorVideoInputPolicy {
-	p := &MeteorVideoInputPolicy{Modes: []string{"text", "frames"}, ReferenceTypes: []string{}, FirstFrame: true, LastFrame: true, LastFrameRequiresFirst: true, ReferenceVideoWithGeneratedAudio: true, ReferenceLimits: MeteorReferenceLimits{Total: 4}, ValidationNotice: "本站保护额度：单张图片20 MiB、单个视频50 MiB、单个音频20 MiB，单次素材总计100 MiB且最多4个。首尾帧与参考素材分开提交；暂不开放自动时长、样片及视频编辑模式。"}
+	p := &MeteorVideoInputPolicy{Modes: []string{"text", "frames"}, ReferenceTypes: []string{}, FirstFrame: true, LastFrame: true, LastFrameRequiresFirst: true, ReferenceVideoWithGeneratedAudio: true, ReferenceLimits: MeteorReferenceLimits{Total: 4}, ValidationNotice: "单张图片10 MiB、单个视频50 MiB、单个音频20 MiB，单次素材总计100 MiB。首尾帧与参考素材分开提交。"}
 	switch modelName {
 	case "doubao-seedance-2.5":
 		p.Modes = append(p.Modes, "reference")
 		p.ReferenceTypes = []string{"image", "video", "audio"}
-		p.ReferenceLimits = MeteorReferenceLimits{Images: 4, Videos: 4, Audios: 4, Total: 4}
+		p.ReferenceLimits = MeteorReferenceLimits{Images: 10, Videos: 4, Audios: 4, Total: 10}
 		p.AudioOnlyReferences = true
 		p.ReferenceDuration = &MeteorDuration{Min: 2, Max: 30}
 	case "doubao-seedance-2.0", "doubao-seedance-2.0-fast", "doubao-seedance-2.0-mini":
 		p.Modes = append(p.Modes, "reference")
 		p.ReferenceTypes = []string{"image", "video", "audio"}
-		p.ReferenceLimits = MeteorReferenceLimits{Images: 4, Videos: 3, Audios: 3, Total: 4}
+		p.ReferenceLimits = MeteorReferenceLimits{Images: 9, Videos: 3, Audios: 3, Total: 10}
 		p.ReferenceDuration = &MeteorDuration{Min: 2, Max: 15}
 	case "doubao-seedance-1.5-pro":
+	case "MiniMax-H3":
+		p.Modes = append(p.Modes, "reference")
+		p.ReferenceTypes = []string{"image", "video", "audio"}
+		p.ReferenceLimits = MeteorReferenceLimits{Images: 10, Videos: 3, Audios: 3, Total: 10}
+		p.ReferenceVideoWithGeneratedAudio = false
+	case "tencent-mps-superres":
+		p.Modes = []string{"enhance"}
+		p.ReferenceTypes = []string{"video"}
+		p.FirstFrame, p.LastFrame = false, false
+		p.ReferenceLimits = MeteorReferenceLimits{Videos: 1, Total: 1}
+		p.ValidationNotice = "上传一个视频进行增强，单个视频不能超过50 MiB。"
 	case "kling-v3":
 		p.LastFrameRequiresFirst = false
 	case "kling-v3-omni":
@@ -81,19 +92,30 @@ func meteorVideoInputPolicy(modelName string) *MeteorVideoInputPolicy {
 // MeteorVideoMaterials is parsed once from the canonical video request. URLs are
 // replaced by owned, verified media URLs before a paid task may be claimed.
 type MeteorVideoMaterials struct {
-	Model       string
-	Prompt      string
-	AspectRatio string
-	Audio       bool
-	FirstFrame  string
-	LastFrame   string
-	References  []string
+	Model             string
+	Prompt            string
+	AspectRatio       string
+	Audio             bool
+	FirstFrame        string
+	LastFrame         string
+	References        []string
+	InputImageCount   int
+	InputVideoSeconds float64
 }
 
 func MeteorValidateVideoInput(input MeteorVideoMaterials) error {
 	p := meteorVideoInputPolicy(input.Model)
 	if p == nil {
 		return nil
+	}
+	if input.Model == "tencent-mps-superres" {
+		if input.FirstFrame != "" || input.LastFrame != "" || len(input.References) != 1 || MeteorReferenceType(input.References[0]) != "video" {
+			return errors.New("视频增强需要且只能提供一个源视频")
+		}
+		return nil
+	}
+	if input.Model == "MiniMax-H3" && strings.TrimSpace(input.Prompt) == "" {
+		return errors.New("MiniMax-H3需要填写提示词")
 	}
 	if input.FirstFrame == "" && input.LastFrame == "" && len(input.References) == 0 && strings.TrimSpace(input.Prompt) == "" {
 		return errors.New("文生视频需要填写提示词")
@@ -143,7 +165,7 @@ func MeteorValidateVideoInput(input MeteorVideoMaterials) error {
 		count.Total++
 	}
 	if count.Total > p.ReferenceLimits.Total {
-		return errors.New("视频单次素材最多4个")
+		return fmt.Errorf("当前模型单次素材最多%d个", p.ReferenceLimits.Total)
 	}
 	if count.Audios > 0 && count.Images+count.Videos == 0 && !p.AudioOnlyReferences {
 		return errors.New("当前模型音频参考需要搭配图片或视频")
@@ -186,6 +208,11 @@ func MeteorPrepareVideoMaterials(ctx context.Context, input MeteorVideoMaterials
 		if err != nil {
 			return "", err
 		}
+		if kind == "image" {
+			input.InputImageCount++
+		} else if kind == "video" {
+			input.InputVideoSeconds += object.DurationSeconds
+		}
 		total += object.Bytes
 		if total > MeteorReferenceMaxBytes {
 			return "", errors.New("单次参考素材总大小不能超过100 MiB")
@@ -219,6 +246,12 @@ func MeteorPrepareVideoMaterials(ctx context.Context, input MeteorVideoMaterials
 }
 
 func meteorVideoResolutionAllowed(modelName, value string) bool {
+	if modelName == "MiniMax-H3" {
+		return strings.EqualFold(value, "768P") || strings.EqualFold(value, "2K")
+	}
+	if modelName == "tencent-mps-superres" {
+		return value == "720p" || value == "1080p" || strings.EqualFold(value, "2K") || strings.EqualFold(value, "4K")
+	}
 	if !meteorValidResolution(value) {
 		return false
 	}

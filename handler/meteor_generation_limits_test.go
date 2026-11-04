@@ -20,8 +20,8 @@ func TestMeteorImageBoundaryJSONAndMultipart(t *testing.T) {
 		{`{"model":"gpt-image-2","n":5}`, "/images/generations", true, false},
 		{`{"model":"gpt-image-2","n":1,"extra_body":{"batch_size":5}}`, "/images/generations", true, false},
 		{`{"model":"gpt-image-2","n":1.5}`, "/images/generations", true, false},
-		{`{"model":"gpt-image-2","images":["a","b","c","d","e"]}`, "/images/edits", true, false},
-		{`{"model":"gpt-image-2","extra_body":{"images":["a","b","c","d","e"]}}`, "/images/edits", true, false},
+		{`{"model":"gpt-image-2","images":["a","b","c","d","e"]}`, "/images/edits", true, true},
+		{`{"model":"gpt-image-2","extra_body":{"images":["a","b","c","d","e"]}}`, "/images/edits", true, true},
 		{`{"model":"gpt-image-2","_parameterTranslation":{}}`, "/images/generations", true, false},
 		{`{"model":"gpt-image-2"}`, "/chat/completions", true, false},
 		{`{"model":"gpt-image-2"}`, "/responses", false, false},
@@ -33,7 +33,7 @@ func TestMeteorImageBoundaryJSONAndMultipart(t *testing.T) {
 			t.Errorf("body=%s valid=%v err=%v", fixture.body, fixture.valid, err)
 		}
 	}
-	for count := 4; count <= 5; count++ {
+	for count := 10; count <= 11; count++ {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		_ = writer.WriteField("model", "gpt-image-2")
@@ -44,7 +44,7 @@ func TestMeteorImageBoundaryJSONAndMultipart(t *testing.T) {
 		}
 		_ = writer.Close()
 		err := validateMeteorAIRequest(body.Bytes(), writer.FormDataContentType(), "/images/edits", channel, true)
-		if (err == nil) != (count == 4) {
+		if (err == nil) != (count == 10) {
 			t.Errorf("multipart count%d err%v", count, err)
 		}
 	}
@@ -55,7 +55,7 @@ func TestMeteorImageBoundaryJSONAndMultipart(t *testing.T) {
 }
 
 func TestMeteorVideoCanonicalBodyLimitsAndWatermark(t *testing.T) {
-	for _, body := range []string{`{"audio":{},"generate_audio":{}}`, `{"audio":true,"generate_audio":false}`, `{"duration":5,"seconds":7}`, `{"count":2}`, `{"extra_body":{"n":2}}`, `{"duration":4.5}`, `{"duration":"oops"}`, `{"_parameterTranslation":{}}`, `{"reference_images":["a","b","c","d","e"]}`} {
+	for _, body := range []string{`{"audio":{},"generate_audio":{}}`, `{"audio":true,"generate_audio":false}`, `{"duration":5,"seconds":7}`, `{"count":2}`, `{"extra_body":{"n":2}}`, `{"duration":4.5}`, `{"duration":"oops"}`, `{"_parameterTranslation":{}}`, `{"reference_images":["a","b","c","d","e","f","g","h","i","j","k"]}`} {
 		if _, err := meteorVideoBody([]byte(body)); err == nil {
 			t.Fatal("unsupported video body accepted", body)
 		}

@@ -84,10 +84,21 @@ func MeteorVideoForContent(r *http.Request, id string) (model.VideoTask, error) 
 
 func meteorVideoExpired(task model.VideoTask) bool {
 	if task.CompletedAt == "" {
-		return false
+		return task.Model == "tencent-mps-superres" && IsCompletedVideoTaskStatus(task.Status)
 	}
-	expiry, err := time.Parse(time.RFC3339Nano, MeteorExpiry(task.CompletedAt))
+	expiry, err := time.Parse(time.RFC3339Nano, MeteorVideoExpiry(task))
 	return err != nil || !time.Now().Before(expiry)
+}
+
+func MeteorVideoExpiry(task model.VideoTask) string {
+	if task.Model != "tencent-mps-superres" {
+		return MeteorExpiry(task.CompletedAt)
+	}
+	completed, err := time.Parse(time.RFC3339Nano, task.CompletedAt)
+	if err != nil {
+		return ""
+	}
+	return completed.Add(24 * time.Hour).UTC().Format(time.RFC3339Nano)
 }
 
 func MeteorStoreGeneratedImage(ctx context.Context, value string) (UploadedStorageObject, error) {

@@ -1,11 +1,11 @@
 import type { MeteorCapabilities, MeteorUploadPolicy } from "@/types/meteor-pricing";
 
 export const SITE_REFERENCE_UPLOADS: MeteorUploadPolicy = {
-    imageMaxBytes: 20 * 1024 * 1024, videoMaxBytes: 50 * 1024 * 1024,
+    imageMaxBytes: 10 * 1024 * 1024, videoMaxBytes: 50 * 1024 * 1024,
     audioMaxBytes: 20 * 1024 * 1024, totalReferenceMaxBytes: 100 * 1024 * 1024,
     policySource: "site", metadataRequired: true,
 };
-export const REFERENCE_UPLOAD_NOTICE = "图片≤20 MiB · 视频≤50 MiB · 音频≤20 MiB · 每次合计≤100 MiB";
+export const REFERENCE_UPLOAD_NOTICE = "图片≤10 MB · 视频≤50 MB · 音频≤20 MB · 每次合计≤100 MB";
 type Material = { bytes?: number; durationMs?: number };
 export type VideoMaterialSelection = {
     references?: Material[]; videoReferences?: Material[]; audioReferences?: Material[];
@@ -59,7 +59,7 @@ export function videoInputError(capabilities: MeteorCapabilities | undefined, in
         if (items.some(item => typeof item.bytes === "number" && item.bytes > limit)) return name + "超过本站单文件大小限制";
     }
     if (all.reduce((total, item) => total + (item.bytes || 0), 0) > uploads.totalReferenceMaxBytes) return "单次参考素材总大小不能超过100 MiB";
-    if (!policy) return all.length > (capabilities?.maxReferences || 4) ? "单次素材最多4个" : "";
+    if (!policy) return all.length > (capabilities?.maxReferences || 10) ? `单次素材最多${capabilities?.maxReferences || 10}个` : "";
     if (input.firstFrame && !policy.firstFrame) return "当前模型不支持首帧";
     if (input.lastFrame && !policy.lastFrame) return "当前模型不支持尾帧";
     if (input.lastFrame && !input.firstFrame && policy.lastFrameRequiresFirst) return "尾帧需要同时提供首帧";

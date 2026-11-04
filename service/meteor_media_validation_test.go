@@ -106,7 +106,7 @@ func TestMeteorUploadsStreamBoundedAndOwnedReferences(t *testing.T) {
 	}
 	repeating := &meteorRepeatingReader{}
 	oversized := io.MultiReader(bytes.NewReader(png), repeating)
-	if _, err = MeteorUploadStream(ctx, "oversized.png", "image/png", oversized); err == nil || !strings.Contains(err.Error(), "20 MiB") {
+	if _, err = MeteorUploadStream(ctx, "oversized.png", "image/png", oversized); err == nil || !strings.Contains(err.Error(), "10 MiB") {
 		t.Fatal("oversized image accepted", err)
 	}
 	if repeating.count > MeteorImageMaxBytes+512 {

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tigerowo/infinite-canvas/model"
+	"github.com/tigerowo/infinite-canvas/service"
 )
 
 var meteorCountFields = map[string]bool{"n": true, "count": true, "num_images": true, "num_outputs": true, "output_count": true, "batch_size": true, "batchsize": true, "candidatecount": true}
@@ -151,7 +152,10 @@ func validateMeteorAIRequest(body []byte, contentType, path string, channel mode
 				if name != "mask" {
 					references++
 				}
-				_, _ = io.Copy(io.Discard, part)
+				count, err := io.Copy(io.Discard, io.LimitReader(part, service.MeteorImageMaxBytes+1))
+				if err != nil || count > service.MeteorImageMaxBytes {
+					return errors.New("单张参考图片不能超过10 MiB")
+				}
 			} else {
 				raw, err := io.ReadAll(io.LimitReader(part, (1<<20)+1))
 				if err != nil || len(raw) > 1<<20 {
@@ -169,8 +173,8 @@ func validateMeteorAIRequest(body []byte, contentType, path string, channel mode
 			}
 			_ = part.Close()
 		}
-		if references > 4 {
-			return errors.New("参考图片最多4张")
+		if references > 10 {
+			return errors.New("参考图片最多10张")
 		}
 		return nil
 	}
@@ -187,8 +191,8 @@ func validateMeteorAIRequest(body []byte, contentType, path string, channel mode
 	if err := meteorValidateValues(input, 4); err != nil {
 		return err
 	}
-	if meteorAllImageReferences(input) > 4 {
-		return errors.New("参考图片最多4张")
+	if meteorAllImageReferences(input) > 10 {
+		return errors.New("参考图片最多10张")
 	}
 	return nil
 }

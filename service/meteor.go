@@ -247,7 +247,7 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 					}
 					continue
 				}
-				if strings.Contains(lower, "video") || strings.Contains(lower, "seedance") || strings.Contains(lower, "kling") || strings.Contains(lower, "veo") || strings.Contains(lower, "sora") {
+				if strings.Contains(lower, "video") || strings.Contains(lower, "seedance") || strings.Contains(lower, "kling") || strings.Contains(lower, "veo") || strings.Contains(lower, "sora") || lower == "minimax-h3" || lower == "tencent-mps-superres" {
 					if meteorGroupAllowsVideo(group) {
 						videoModels = append(videoModels, name)
 					}

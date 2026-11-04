@@ -12,7 +12,7 @@ const caps = {
 const image = { bytes: 1024 }, clip = { bytes: 2048, durationMs: 3000 };
 
 test("reference sizes reject before reading or uploading the payload", () => {
-    for (const [type, size] of [["image/png", 20], ["video/mp4", 50], ["audio/mpeg", 20]] as const) {
+    for (const [type, size] of [["image/png", 10], ["video/mp4", 50], ["audio/mpeg", 20]] as const) {
         expect(() => assertReferenceFileSize({ type, size: size * 1024 * 1024 })).not.toThrow();
         expect(() => assertReferenceFileSize({ type, size: size * 1024 * 1024 + 1 })).toThrow("MiB");
     }

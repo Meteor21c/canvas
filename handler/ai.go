@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +20,30 @@ import (
 )
 
 const userModelChannelHeader = "X-User-Model-Channel-ID"
+
+const (
+	meteorAIJSONMaxBytes       int64 = 32 << 20
+	meteorAIFieldMaxBytes      int64 = 64 << 10
+	meteorAIFieldTotalMaxBytes int64 = 1 << 20
+	meteorAIMultipartMaxBytes        = service.MeteorReferenceMaxBytes + meteorAIFieldTotalMaxBytes
+)
+
+type canvasAIRequestBodyKey struct{}
+
+func tryAIRequestGeneration(r *http.Request) (func(), bool) {
+	release, available := service.TryMeteorGeneration()
+	if !available || !service.MeteorEnabled() || !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		return release, available
+	}
+	// A multipart request can retain 100 MiB through generation. Reserve both
+	// existing slots until its async task finishes; JSON keeps normal capacity.
+	releaseSecond, available := service.TryMeteorGeneration()
+	if !available {
+		release()
+		return func() {}, false
+	}
+	return func() { releaseSecond(); release() }, true
+}
 
 func selectAIRequestChannel(user model.AuthUser, modelName string, channelID string, userChannelID string, publicOnly bool) (model.ModelChannel, string, error) {
 	if service.MeteorEnabled() {
@@ -136,10 +161,10 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
-	if service.MeteorEnabled() && r.Header.Get("X-Canvas-Node-Request") != "true" {
-		release, available := service.TryMeteorGeneration()
+	if _, internal := r.Context().Value(canvasAIRequestBodyKey{}).([]byte); service.MeteorEnabled() && !internal {
+		release, available := tryAIRequestGeneration(r)
 		if !available {
-			FailWithStatus(w, 429, "已有两个生成请求正在处理，请稍后再试")
+			FailWithStatus(w, 429, "生成请求正在处理，请稍后再试")
 			return
 		}
 		defer release()
@@ -391,19 +416,11 @@ func summarizeMultipartAIRequest(body []byte, contentType string) string {
 	if err != nil {
 		return "multipart/form-data"
 	}
-	form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+	fields, files, err := readMultipartAIFields(body, params["boundary"])
 	if err != nil {
 		return "multipart/form-data"
 	}
-	defer form.RemoveAll()
-	summary := map[string]any{"fields": form.Value}
-	files := []map[string]any{}
-	for field, headers := range form.File {
-		for _, header := range headers {
-			files = append(files, map[string]any{"field": field, "filename": header.Filename, "size": header.Size, "contentType": header.Header.Get("Content-Type")})
-		}
-	}
-	summary["files"] = files
+	summary := map[string]any{"fields": fields, "files": files}
 	encoded, _ := json.MarshalIndent(summary, "", "  ")
 	return string(encoded)
 }
@@ -463,7 +480,19 @@ func looksLikeBase64(value string) bool {
 
 func readAIRequest(r *http.Request) ([]byte, string, string, error) {
 	contentType := r.Header.Get("Content-Type")
-	body, err := io.ReadAll(r.Body)
+	body, internal := r.Context().Value(canvasAIRequestBodyKey{}).([]byte)
+	var err error
+	if !internal {
+		if service.MeteorEnabled() {
+			limit := meteorAIJSONMaxBytes
+			if strings.HasPrefix(contentType, "multipart/form-data") {
+				limit = meteorAIMultipartMaxBytes
+			}
+			body, err = readBoundedAIRequestBody(r.Body, r.ContentLength, limit)
+		} else {
+			body, err = io.ReadAll(r.Body)
+		}
+	}
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -489,15 +518,84 @@ func readMultipartModel(body []byte, contentType string) string {
 		return ""
 	}
 	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
-	form, err := reader.ReadForm(32 << 20)
-	if err != nil {
-		return ""
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			return ""
+		}
+		if part.FormName() == "model" && part.FileName() == "" {
+			value, err := readMultipartTextField(part)
+			if err == nil {
+				return value
+			}
+			return ""
+		}
 	}
-	defer form.RemoveAll()
-	if values := form.Value["model"]; len(values) > 0 {
-		return values[0]
+}
+
+func readBoundedAIRequestBody(source io.Reader, contentLength, limit int64) ([]byte, error) {
+	if contentLength > limit {
+		return nil, fmt.Errorf("请求不能超过%d MiB", limit>>20)
 	}
-	return ""
+	var buffer bytes.Buffer
+	if contentLength > 0 {
+		buffer.Grow(int(contentLength + bytes.MinRead))
+	} else {
+		// A chunked request can reach the same cap. Allocate once instead of
+		// retaining both old and doubled 100 MiB buffers during growth.
+		buffer.Grow(int(limit + 1 + bytes.MinRead))
+	}
+	if _, err := io.Copy(&buffer, io.LimitReader(source, limit+1)); err != nil {
+		return nil, err
+	}
+	if int64(buffer.Len()) > limit {
+		return nil, fmt.Errorf("请求不能超过%d MiB", limit>>20)
+	}
+	return buffer.Bytes(), nil
+}
+
+func readMultipartTextField(source io.Reader) (string, error) {
+	if !service.MeteorEnabled() {
+		value, err := io.ReadAll(source)
+		return string(value), err
+	}
+	value, err := io.ReadAll(io.LimitReader(source, meteorAIFieldMaxBytes+1))
+	if int64(len(value)) > meteorAIFieldMaxBytes {
+		return "", errors.New("单个文本字段不能超过64 KiB")
+	}
+	return string(value), err
+}
+
+func readMultipartAIFields(body []byte, boundary string) (map[string][]string, []map[string]any, error) {
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	fields, files := map[string][]string{}, []map[string]any{}
+	var fieldBytes int64
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			return fields, files, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if part.FileName() == "" {
+			value, err := readMultipartTextField(part)
+			if err != nil {
+				return nil, nil, err
+			}
+			fieldBytes += int64(len(value))
+			if service.MeteorEnabled() && fieldBytes > meteorAIFieldTotalMaxBytes {
+				return nil, nil, errors.New("上传文本字段总大小不能超过1 MiB")
+			}
+			fields[part.FormName()] = append(fields[part.FormName()], value)
+		} else {
+			size, err := io.Copy(io.Discard, part)
+			if err != nil {
+				return nil, nil, err
+			}
+			files = append(files, map[string]any{"field": part.FormName(), "filename": part.FileName(), "size": size, "contentType": part.Header.Get("Content-Type")})
+		}
+	}
 }
 
 func readAIRequestCount(body []byte, contentType string, video bool) int {
@@ -508,21 +606,20 @@ func readAIRequestCount(body []byte, contentType string, video bool) int {
 		if err != nil {
 			return count
 		}
-		form, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+		fields, _, err := readMultipartAIFields(body, params["boundary"])
 		if err != nil {
 			return count
 		}
-		defer form.RemoveAll()
 		if video {
 			count = 0
 			for _, field := range []string{"seconds", "duration"} {
-				if values := form.Value[field]; len(values) > 0 {
+				if values := fields[field]; len(values) > 0 {
 					if _, err := fmt.Sscan(values[0], &count); err == nil && count != 0 {
 						break
 					}
 				}
 			}
-		} else if values := form.Value["n"]; len(values) > 0 {
+		} else if values := fields["n"]; len(values) > 0 {
 			_, _ = fmt.Sscan(values[0], &count)
 		}
 	} else if video {

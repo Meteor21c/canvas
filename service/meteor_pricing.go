@@ -20,45 +20,85 @@ import (
 
 // All public prices use a positive allowlist. Never forward raw main responses.
 type MeteorQuoteInput struct {
-	Kind       string `json:"kind"`
-	ChannelID  string `json:"channelId"`
-	Model      string `json:"model"`
-	Count      int    `json:"count"`
-	Resolution string `json:"resolution"`
-	Quality    string `json:"quality"`
-	Size       string `json:"size"`
-	Duration   int    `json:"duration"`
-	Audio      bool   `json:"audio"`
-	InputVideo bool   `json:"inputVideo"`
+	Kind                  string  `json:"kind"`
+	ChannelID             string  `json:"channelId"`
+	Model                 string  `json:"model"`
+	Count                 int     `json:"count"`
+	Resolution            string  `json:"resolution"`
+	Quality               string  `json:"quality"`
+	Size                  string  `json:"size"`
+	Duration              int     `json:"duration"`
+	Audio                 bool    `json:"audio"`
+	InputVideo            bool    `json:"inputVideo"`
+	FrameRate             int     `json:"frameRate"`
+	SourceDurationSeconds float64 `json:"sourceDurationSeconds"`
+	InputVideoSeconds     float64 `json:"inputVideoSeconds"`
+	InputImageCount       int     `json:"inputImageCount"`
 }
 type MeteorPrice struct {
-	Available          bool               `json:"available"`
-	Kind               string             `json:"kind"`
-	Model              string             `json:"model"`
-	ChannelID          string             `json:"channelId"`
-	BillingMode        string             `json:"billingMode"`
-	Unit               string             `json:"unit"`
-	Currency           string             `json:"currency"`
-	SiteUnitPrice      *string            `json:"siteUnitPrice"`
-	OfficialUnitPrice  *string            `json:"officialUnitPrice"`
-	SaleRateToOfficial *string            `json:"saleRateToOfficial"`
-	EstimatedAmount    *string            `json:"estimatedAmount"`
-	PrechargeAmount    *string            `json:"prechargeAmount"`
-	Exact              bool               `json:"exact"`
-	Notice             string             `json:"notice"`
-	TokenPrices        map[string]*string `json:"tokenPrices,omitempty"`
-	ImagePriceBySize   map[string]*string `json:"imagePriceBySize,omitempty"`
+	Available                bool               `json:"available"`
+	Kind                     string             `json:"kind"`
+	Model                    string             `json:"model"`
+	ChannelID                string             `json:"channelId"`
+	BillingMode              string             `json:"billingMode"`
+	Unit                     string             `json:"unit"`
+	Currency                 string             `json:"currency"`
+	SiteUnitPrice            *string            `json:"siteUnitPrice"`
+	OfficialUnitPrice        *string            `json:"officialUnitPrice"`
+	SaleRateToOfficial       *string            `json:"saleRateToOfficial"`
+	EstimatedAmount          *string            `json:"estimatedAmount"`
+	PrechargeAmount          *string            `json:"prechargeAmount"`
+	Exact                    bool               `json:"exact"`
+	Notice                   string             `json:"notice"`
+	TokenPrices              map[string]*string `json:"tokenPrices,omitempty"`
+	ImagePriceBySize         map[string]*string `json:"imagePriceBySize,omitempty"`
+	Surcharges               []MeteorSurcharge  `json:"surcharges,omitempty"`
+	EstimatedSurchargeAmount *string            `json:"estimatedSurchargeAmount,omitempty"`
 }
+type MeteorSurcharge struct {
+	Code              string  `json:"code"`
+	MetricKey         string  `json:"metricKey"`
+	Unit              string  `json:"unit"`
+	FreeUnits         float64 `json:"freeUnits"`
+	OfficialUnitPrice *string `json:"officialUnitPrice"`
+	SiteUnitPrice     *string `json:"siteUnitPrice"`
+}
+type meteorRawSurcharge struct {
+	Code              string          `json:"code"`
+	MetricKey         string          `json:"metric_key"`
+	Unit              string          `json:"unit"`
+	FreeUnits         float64         `json:"free_units"`
+	OfficialUnitPrice json.RawMessage `json:"official_unit_price"`
+	SaleUnitPrice     json.RawMessage `json:"sale_unit_price"`
+}
+
+func meteorSafeSurcharges(raw []meteorRawSurcharge) []MeteorSurcharge {
+	result := []MeteorSurcharge{}
+	for _, row := range raw {
+		if row.FreeUnits < 0 || math.IsNaN(row.FreeUnits) || math.IsInf(row.FreeUnits, 0) || (row.Unit != "second" && row.Unit != "image") {
+			continue
+		}
+		sale, official := meteorDecimal(row.SaleUnitPrice), meteorDecimal(row.OfficialUnitPrice)
+		if sale == nil {
+			continue
+		}
+		result = append(result, MeteorSurcharge{Code: row.Code, MetricKey: row.MetricKey, Unit: row.Unit, FreeUnits: row.FreeUnits, SiteUnitPrice: sale, OfficialUnitPrice: official})
+	}
+	return result
+}
+
 type MeteorScenario struct {
-	Resolutions        []string `json:"resolutions"`
-	Audio              bool     `json:"audio"`
-	InputVideo         bool     `json:"inputVideo"`
-	BillingMode        string   `json:"billingMode"`
-	Unit               string   `json:"unit"`
-	Currency           string   `json:"currency"`
-	SiteUnitPrice      *string  `json:"siteUnitPrice"`
-	OfficialUnitPrice  *string  `json:"officialUnitPrice"`
-	SaleRateToOfficial *string  `json:"saleRateToOfficial"`
+	Resolutions        []string          `json:"resolutions"`
+	Audio              bool              `json:"audio"`
+	InputVideo         bool              `json:"inputVideo"`
+	BillingMode        string            `json:"billingMode"`
+	Unit               string            `json:"unit"`
+	Currency           string            `json:"currency"`
+	SiteUnitPrice      *string           `json:"siteUnitPrice"`
+	OfficialUnitPrice  *string           `json:"officialUnitPrice"`
+	SaleRateToOfficial *string           `json:"saleRateToOfficial"`
+	FrameRate          int               `json:"frameRate,omitempty"`
+	Surcharges         []MeteorSurcharge `json:"surcharges,omitempty"`
 }
 type MeteorDuration struct {
 	Min    int   `json:"min"`
@@ -82,19 +122,24 @@ type MeteorCapabilities struct {
 	AspectRatios   []string                `json:"aspectRatios"`
 	Scenarios      []MeteorScenario        `json:"scenarios"`
 	RetentionDays  int                     `json:"retentionDays"`
+	RetentionHours int                     `json:"retentionHours,omitempty"`
+	FrameRates     []int                   `json:"frameRates,omitempty"`
+	Operation      string                  `json:"operation,omitempty"`
 	Notice         string                  `json:"notice"`
 }
 type meteorRawScenario struct {
-	Resolutions     []string        `json:"resolutions"`
-	Audio           *bool           `json:"audio"`
-	InputVideo      *bool           `json:"input_video"`
-	Mode            string          `json:"billing_mode"`
-	Currency        string          `json:"currency"`
-	SaleSecond      json.RawMessage `json:"sale_per_second"`
-	OfficialSecond  json.RawMessage `json:"official_per_second"`
-	SaleMillion     json.RawMessage `json:"sale_per_million"`
-	OfficialMillion json.RawMessage `json:"official_per_million"`
-	Ratio           json.RawMessage `json:"sale_rate_to_official"`
+	Resolutions     []string             `json:"resolutions"`
+	Audio           *bool                `json:"audio"`
+	InputVideo      *bool                `json:"input_video"`
+	Mode            string               `json:"billing_mode"`
+	Currency        string               `json:"currency"`
+	SaleSecond      json.RawMessage      `json:"sale_per_second"`
+	OfficialSecond  json.RawMessage      `json:"official_per_second"`
+	SaleMillion     json.RawMessage      `json:"sale_per_million"`
+	OfficialMillion json.RawMessage      `json:"official_per_million"`
+	Ratio           json.RawMessage      `json:"sale_rate_to_official"`
+	FrameRate       int                  `json:"frame_rate"`
+	Surcharges      []meteorRawSurcharge `json:"surcharges"`
 }
 type meteorVideoCatalog struct {
 	Model       string               `json:"model"`
@@ -210,7 +255,7 @@ func meteorVideoDuration(modelName string) *MeteorDuration {
 		result.Max = 12
 	case "doubao-seedance-2.5":
 		result.Max = 30
-	case "doubao-seedance-2.0", "doubao-seedance-2.0-fast", "doubao-seedance-2.0-mini":
+	case "doubao-seedance-2.0", "doubao-seedance-2.0-fast", "doubao-seedance-2.0-mini", "MiniMax-H3":
 	case "kling-v3", "kling-v3-omni":
 		result.Min = 3
 	case "grok-imagine-video", "grok-imagine-video-1.5", "grok-video":
@@ -221,7 +266,7 @@ func meteorVideoDuration(modelName string) *MeteorDuration {
 	return result
 }
 func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, modelName string) (MeteorCapabilities, error) {
-	cap := MeteorCapabilities{Kind: kind, Model: modelName, ChannelID: channelID, MaxBatch: 4, MaxReferences: 4, ForcedProtocol: "images", Resolutions: []string{}, AspectRatios: []string{}, Scenarios: []MeteorScenario{}, RetentionDays: 7, Uploads: meteorUploadsPolicy()}
+	cap := MeteorCapabilities{Kind: kind, Model: modelName, ChannelID: channelID, MaxBatch: 4, MaxReferences: 10, ForcedProtocol: "images", Resolutions: []string{}, AspectRatios: []string{}, Scenarios: []MeteorScenario{}, RetentionDays: 7, Uploads: meteorUploadsPolicy()}
 	channel, err := MeteorSelectChannel(userID, modelName, channelID)
 	if err != nil {
 		return cap, err
@@ -255,12 +300,19 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 	cap.ForcedProtocol = "sub2api"
 	cap.Duration = meteorVideoDuration(modelName)
 	cap.VideoInput = meteorVideoInputPolicy(modelName)
-	if strings.HasPrefix(modelName, "doubao-seedance-") {
+	if cap.VideoInput != nil {
+		cap.MaxReferences = cap.VideoInput.ReferenceLimits.Images
+	}
+	if modelName == "tencent-mps-superres" {
+		cap.Operation, cap.RetentionHours, cap.RetentionDays = "enhance", 24, 1
+		cap.MaxReferences = 1
+	}
+	if strings.HasPrefix(modelName, "doubao-seedance-") || modelName == "MiniMax-H3" {
 		cap.AspectRatios = []string{"16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"}
 	} else if strings.HasPrefix(modelName, "kling-") {
 		cap.AspectRatios = []string{"16:9", "9:16", "1:1"}
 	}
-	if channel.ModelCapabilities[modelName] != "video" || cap.Duration == nil {
+	if channel.ModelCapabilities[modelName] != "video" || (cap.Duration == nil && cap.Operation != "enhance") {
 		cap.Notice = "当前模型能力尚未确认，暂不可提交"
 		return cap, nil
 	}
@@ -289,7 +341,12 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 		}
 	}
 	for _, row := range raw.Scenarios {
-		safe := MeteorScenario{Resolutions: []string{}, BillingMode: row.Mode, Currency: row.Currency, Unit: "unknown", SaleRateToOfficial: meteorDecimal(row.Ratio)}
+		safe := MeteorScenario{Resolutions: []string{}, BillingMode: row.Mode, Currency: row.Currency, Unit: "unknown", SaleRateToOfficial: meteorDecimal(row.Ratio), FrameRate: row.FrameRate, Surcharges: meteorSafeSurcharges(row.Surcharges)}
+		if cap.Operation == "enhance" {
+			if row.FrameRate != 30 && row.FrameRate != 60 && row.FrameRate != 120 {
+				continue
+			}
+		}
 		for _, value := range row.Resolutions {
 			if meteorVideoResolutionAllowed(modelName, value) {
 				safe.Resolutions = append(safe.Resolutions, value)
@@ -307,8 +364,21 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 			continue
 		}
 		if len(safe.Resolutions) > 0 && safe.SiteUnitPrice != nil {
+			if cap.Operation == "enhance" {
+				found := false
+				for _, value := range cap.FrameRates {
+					found = found || value == row.FrameRate
+				}
+				if !found {
+					cap.FrameRates = append(cap.FrameRates, row.FrameRate)
+				}
+			}
 			// Main null means this tariff does not vary by that input, not false.
-			for _, audio := range meteorScenarioBooleans(row.Audio) {
+			audioValues := meteorScenarioBooleans(row.Audio)
+			if modelName == "MiniMax-H3" || cap.Operation == "enhance" {
+				audioValues = []bool{false}
+			}
+			for _, audio := range audioValues {
 				for _, video := range meteorScenarioBooleans(row.InputVideo) {
 					if modelName == "kling-v3-omni" && audio && video {
 						continue
@@ -316,7 +386,7 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 					entry := safe
 					entry.Audio, entry.InputVideo = audio, video
 					cap.Scenarios = append(cap.Scenarios, entry)
-					cap.SupportsAudio = cap.SupportsAudio || audio
+					cap.SupportsAudio = cap.SupportsAudio || (audio && modelName != "MiniMax-H3" && cap.Operation != "enhance")
 				}
 			}
 		}
@@ -335,22 +405,35 @@ func meteorValidResolution(value string) bool {
 	return value == "480p" || value == "720p" || value == "1080p" || strings.EqualFold(value, "4K")
 }
 func ValidateMeteorVideo(ctx context.Context, userID, channelID, modelName string, duration int, resolution string, audio, inputVideo bool) error {
-	cap, err := MeteorMediaCapabilities(ctx, userID, "video", channelID, modelName)
+	return ValidateMeteorVideoParameters(ctx, userID, MeteorQuoteInput{Kind: "video", ChannelID: channelID, Model: modelName, Duration: duration, Resolution: resolution, Audio: audio, InputVideo: inputVideo})
+}
+func ValidateMeteorVideoParameters(ctx context.Context, userID string, input MeteorQuoteInput) error {
+	cap, err := MeteorMediaCapabilities(ctx, userID, "video", input.ChannelID, input.Model)
 	if err != nil {
 		return err
 	}
-	if !cap.Available || cap.Duration == nil {
+	if !cap.Available || (cap.Duration == nil && cap.Operation != "enhance") {
 		return errors.New("此视频模型的可用参数尚未确认，请刷新模型后重试")
 	}
-	if duration < cap.Duration.Min || duration > cap.Duration.Max {
+	if cap.Duration != nil && (input.Duration < cap.Duration.Min || input.Duration > cap.Duration.Max) {
 		return fmt.Errorf("视频时长须在%d到%d秒之间", cap.Duration.Min, cap.Duration.Max)
 	}
+	if input.InputImageCount < 0 || input.InputImageCount > 10 || input.InputVideoSeconds < 0 || input.InputVideoSeconds > 900 || input.SourceDurationSeconds < 0 || input.SourceDurationSeconds > 300 || math.IsNaN(input.InputVideoSeconds) || math.IsInf(input.InputVideoSeconds, 0) || math.IsNaN(input.SourceDurationSeconds) || math.IsInf(input.SourceDurationSeconds, 0) {
+		return errors.New("参考素材计价参数无效")
+	}
+	if cap.VideoInput != nil && input.InputImageCount > max(2, cap.VideoInput.ReferenceLimits.Images) {
+		return errors.New("参考图片数量超过模型限制")
+	}
 	for _, row := range cap.Scenarios {
-		if row.Audio != audio || row.InputVideo != inputVideo {
+		if cap.Operation == "enhance" {
+			if input.Audio || input.InputImageCount != 0 || row.FrameRate != input.FrameRate {
+				continue
+			}
+		} else if row.Audio != input.Audio || row.InputVideo != input.InputVideo {
 			continue
 		}
 		for _, value := range row.Resolutions {
-			if strings.EqualFold(value, resolution) {
+			if strings.EqualFold(value, input.Resolution) {
 				return nil
 			}
 		}
@@ -376,22 +459,36 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 	if input.Kind != "video" {
 		return quote, errors.New("不支持的计价类型")
 	}
-	if err := ValidateMeteorVideo(ctx, userID, channel.ID, input.Model, input.Duration, input.Resolution, input.Audio, input.InputVideo); err != nil {
+	if err := ValidateMeteorVideoParameters(ctx, userID, input); err != nil {
 		return quote, err
 	}
 	if meteorGrokVideo(input.Model) {
 		return meteorGrokVideoQuote(ctx, userID, channel, input, quote)
 	}
 	query := url.Values{"model": {input.Model}, "resolution": {input.Resolution}, "duration": {strconv.Itoa(input.Duration)}, "audio": {strconv.FormatBool(input.Audio)}, "input_video": {strconv.FormatBool(input.InputVideo)}}
+	if input.Model == "tencent-mps-superres" {
+		// Enhancement has no output-duration control. Omit unrelated zero values
+		// because the gateway validates every supplied estimate independently.
+		query.Del("duration")
+		query.Set("frame_rate", strconv.Itoa(input.FrameRate))
+		if input.SourceDurationSeconds > 0 {
+			query.Set("source_duration_seconds", strconv.FormatFloat(input.SourceDurationSeconds, 'f', -1, 64))
+		}
+	} else if input.Model == "MiniMax-H3" {
+		query.Set("input_video_seconds", strconv.FormatFloat(input.InputVideoSeconds, 'f', -1, 64))
+		query.Set("input_image_count", strconv.Itoa(input.InputImageCount))
+	}
 	var raw struct {
-		Mode            string          `json:"billing_mode"`
-		Currency        string          `json:"currency"`
-		SaleMillion     json.RawMessage `json:"sale_per_million"`
-		OfficialMillion json.RawMessage `json:"official_per_million"`
-		SaleSecond      json.RawMessage `json:"sale_per_second"`
-		OfficialSecond  json.RawMessage `json:"official_per_second"`
-		Ratio           json.RawMessage `json:"sale_rate_to_official"`
-		Precharge       json.RawMessage `json:"precharge_amount"`
+		Mode               string               `json:"billing_mode"`
+		Currency           string               `json:"currency"`
+		SaleMillion        json.RawMessage      `json:"sale_per_million"`
+		OfficialMillion    json.RawMessage      `json:"official_per_million"`
+		SaleSecond         json.RawMessage      `json:"sale_per_second"`
+		OfficialSecond     json.RawMessage      `json:"official_per_second"`
+		Ratio              json.RawMessage      `json:"sale_rate_to_official"`
+		Precharge          json.RawMessage      `json:"precharge_amount"`
+		Surcharges         []meteorRawSurcharge `json:"surcharges"`
+		EstimatedSurcharge json.RawMessage      `json:"estimated_surcharge_amount"`
 	}
 	if err := meteorRawMain(ctx, channel, "/v1/videos/pricing?"+query.Encode(), &raw); err != nil {
 		return quote, nil
@@ -400,6 +497,8 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 	quote.Currency = raw.Currency
 	quote.SaleRateToOfficial = meteorDecimal(raw.Ratio)
 	quote.PrechargeAmount = meteorDecimal(raw.Precharge)
+	quote.Surcharges = meteorSafeSurcharges(raw.Surcharges)
+	quote.EstimatedSurchargeAmount = meteorDecimal(raw.EstimatedSurcharge)
 	if raw.Mode == "second" {
 		quote.Unit = "second"
 		quote.SiteUnitPrice = meteorDecimal(raw.SaleSecond)
@@ -407,6 +506,10 @@ func MeteorMediaQuote(ctx context.Context, userID string, input MeteorQuoteInput
 		if quote.SiteUnitPrice != nil {
 			price, _ := strconv.ParseFloat(*quote.SiteUnitPrice, 64)
 			quote.EstimatedAmount = meteorNumber(price * float64(input.Duration))
+			if quote.EstimatedSurchargeAmount != nil {
+				extra, _ := strconv.ParseFloat(*quote.EstimatedSurchargeAmount, 64)
+				quote.EstimatedAmount = meteorNumber(price*float64(input.Duration) + extra)
+			}
 		}
 		quote.Notice = "先预扣，完成后按实际生成时长结算，多退少补"
 	} else if raw.Mode == "token" {

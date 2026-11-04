@@ -134,7 +134,7 @@ const RESULT_VIEW_MODE_KEY = "infinite-canvas:image-result-view-mode";
 const IMAGE_TASK_POLL_INTERVAL_MS = 10000;
 const WORKFLOW_BUTTON_POSITION_KEY = "infinite-canvas:workflow-button-position";
 const MAX_IMAGE_COUNT = 4;
-const MAX_IMAGE_REFERENCES = 4;
+const MAX_IMAGE_REFERENCES = 10;
 const imageCountOptions = [1, 2, 3, 4].map((count) => ({ value: String(count), label: `${count} 张` }));
 const normalizedImageCount = (value: string | number | undefined) => Math.max(1, Math.min(MAX_IMAGE_COUNT, Math.floor(Number(value) || 1)));
 const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
@@ -196,7 +196,7 @@ export default function ImagePage() {
     };
     const reserveReferenceSlots = (count: number) => {
         if (referencesRef.current.length + reservedReferenceCountRef.current + count > MAX_IMAGE_REFERENCES) {
-            message.warning("最多添加 4 张参考图，请先移除不需要的图片。");
+            message.warning("最多添加 10 张参考图，请先移除不需要的图片。");
             return false;
         }
         reservedReferenceCountRef.current += count;
@@ -584,7 +584,7 @@ export default function ImagePage() {
             return;
         }
         if (snapshot.references.length > MAX_IMAGE_REFERENCES) {
-            message.warning("最多使用 4 张参考图，请移除多余图片后再生成。");
+            message.warning("最多使用 10 张参考图，请移除多余图片后再生成。");
             return;
         }
         snapshot = { ...snapshot, requestConfig: { ...snapshot.requestConfig, apiMode: "images" }, displayConfig: { ...snapshot.displayConfig, apiMode: "images" } };
@@ -1119,7 +1119,7 @@ export default function ImagePage() {
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
         if ((log.references || []).length + reservedReferenceCountRef.current > MAX_IMAGE_REFERENCES) {
-            message.warning("该记录包含超过 4 张参考图，未恢复到工作台。请保留需要的图片后再生成。");
+            message.warning("该记录包含超过 10 张参考图，未恢复到工作台。请保留需要的图片后再生成。");
             return;
         }
         setPrompt(log.prompt);
@@ -1160,7 +1160,7 @@ export default function ImagePage() {
             return null;
         }
         if (referenceItems.length > MAX_IMAGE_REFERENCES) {
-            message.warning("最多使用 4 张参考图，请移除多余图片后再生成。");
+            message.warning("最多使用 10 张参考图，请移除多余图片后再生成。");
             return null;
         }
         if (!Number.isInteger(taskCount) || taskCount < 1 || taskCount > MAX_IMAGE_COUNT) {

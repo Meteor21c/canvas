@@ -38,6 +38,7 @@ var meteorProbeSlots = make(chan struct{}, 2)
 type meteorMediaMetadata struct {
 	Width, Height int
 	Duration      float64
+	FrameRate     float64
 }
 
 func meteorMediaKind(mediaType string) string { kind, _, _ := strings.Cut(mediaType, "/"); return kind }
@@ -207,7 +208,7 @@ func meteorProbeMedia(ctx context.Context, filename, mediaType string) (meteorMe
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(probeCtx, "ffprobe", "-v", "error", "-max_alloc", "16777216", "-threads", "1", "-protocol_whitelist", "file,pipe", "-probesize", "4194304", "-analyzeduration", "5000000", "-show_entries", "stream=codec_type,width,height,duration:format=duration", "-of", "json", filename)
+	cmd := exec.CommandContext(probeCtx, "ffprobe", "-v", "error", "-max_alloc", "16777216", "-threads", "1", "-protocol_whitelist", "file,pipe", "-probesize", "4194304", "-analyzeduration", "5000000", "-show_entries", "stream=codec_type,width,height,duration,avg_frame_rate:format=duration", "-of", "json", filename)
 	output := &meteorBoundedOutput{limit: 64 << 10}
 	cmd.Stdout = output
 	cmd.Stderr = io.Discard
@@ -217,10 +218,11 @@ func meteorProbeMedia(ctx context.Context, filename, mediaType string) (meteorMe
 	}
 	var result struct {
 		Streams []struct {
-			Type     string `json:"codec_type"`
-			Width    int    `json:"width"`
-			Height   int    `json:"height"`
-			Duration string `json:"duration"`
+			Type      string `json:"codec_type"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+			Duration  string `json:"duration"`
+			FrameRate string `json:"avg_frame_rate"`
 		} `json:"streams"`
 		Format struct {
 			Duration string `json:"duration"`
@@ -236,6 +238,14 @@ func meteorProbeMedia(ctx context.Context, filename, mediaType string) (meteorMe
 			hasVideo = true
 			metadata.Width = max(metadata.Width, stream.Width)
 			metadata.Height = max(metadata.Height, stream.Height)
+			numerator, denominator, found := strings.Cut(stream.FrameRate, "/")
+			if found {
+				n, _ := strconv.ParseFloat(numerator, 64)
+				d, _ := strconv.ParseFloat(denominator, 64)
+				if d > 0 && n > 0 && !math.IsNaN(n/d) && !math.IsInf(n/d, 0) {
+					metadata.FrameRate = max(metadata.FrameRate, n/d)
+				}
+			}
 		}
 		if stream.Type == "audio" {
 			hasAudio = true
@@ -289,6 +299,13 @@ func MeteorResolveMaterial(ctx context.Context, value, kind string) (UploadedSto
 		return UploadedStorageObject{}, errors.New("素材地址无效")
 	}
 	mediaPath := strings.TrimPrefix(parsed.Path, "/studio")
+	if strings.HasPrefix(mediaPath, "/api/v1/videos/") && strings.HasSuffix(mediaPath, "/content") {
+		if kind != "video" {
+			return UploadedStorageObject{}, errors.New("素材类型与当前输入要求不符")
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(mediaPath, "/api/v1/videos/"), "/content")
+		return meteorResolveTaskVideoMaterial(ctx, id)
+	}
 	if strings.HasPrefix(mediaPath, "/api/files/") && strings.HasSuffix(mediaPath, "/content") {
 		id := strings.TrimSuffix(strings.TrimPrefix(mediaPath, "/api/files/"), "/content")
 		if _, err = uuid.Parse(id); err != nil {

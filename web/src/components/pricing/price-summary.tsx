@@ -46,11 +46,13 @@ export function QuoteDetails({ quote, count = 1, duration, resolution, compact =
             </div>
             {hasUnit ? <div>{resolution ? <span className="mr-2 uppercase">{resolution}</span> : null}本站单价 <span className="font-medium text-foreground">{formatPrice(quote.siteUnitPrice, quote.currency)}{unit}</span>{priceNumber(quote.officialUnitPrice) !== null ? <span className="ml-2">官方 {formatPrice(quote.officialUnitPrice, quote.currency)}{unit}</span> : null}</div> : null}
             {rate ? <div>{rate}</div> : null}
+            {quote.surcharges?.map(charge => <div key={charge.code} className="text-xs">{charge.unit === "image" ? `参考图前 ${charge.freeUnits} 张免费，超出 ${formatPrice(charge.siteUnitPrice, quote.currency)} / 张` : charge.unit === "second" ? `参考视频 ${formatPrice(charge.siteUnitPrice, quote.currency)} / 秒` : null}</div>)}
+            {priceNumber(quote.estimatedSurchargeAmount) !== null && Number(quote.estimatedSurchargeAmount) > 0 ? <p className="m-0 font-medium text-foreground">本次参考素材费用约 {formatPrice(quote.estimatedSurchargeAmount, quote.currency)}</p> : null}
             {quote.tokenPrices ? <div className="space-y-0.5 text-xs">{([
                 ["inputPerMillion", "文本输入"], ["cacheReadPerMillion", "缓存读取"], ["imageInputPerMillion", "图片输入"], ["imageOutputPerMillion", "图片输出"], ["outputPerMillion", "文本输出"],
             ] as const).filter(([key]) => priceNumber(quote.tokenPrices?.[key]) !== null).map(([key, label]) => <div key={key}>{label} {formatPrice(quote.tokenPrices?.[key], quote.currency)} / 百万 Token</div>)}</div> : null}
             {quote.notice ? <p className="m-0 text-xs opacity-80">{quote.notice}</p> : null}
-            {!quote.exact && hasPrecharge ? <p className="m-0 text-xs opacity-80">预扣金额不等于最终消耗，完成后按实际用量结算。</p> : null}
+            {!quote.exact && hasPrecharge && !quote.notice ? <p className="m-0 text-xs opacity-80">先预扣，完成后按实际用量多退少补。</p> : null}
         </div>
     );
 }

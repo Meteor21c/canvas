@@ -99,6 +99,8 @@ export type CanvasNodeMetadata = {
     videoTaskId?: string;
     videoTaskVideoId?: string;
     videoTaskTranslation?: import("@/services/api/video").VideoResponse["translationSnapshot"];
+    videoEnhancementExpiresAt?: number;
+    videoEnhancementFrameRate?: number;
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
     multiShot?: string;

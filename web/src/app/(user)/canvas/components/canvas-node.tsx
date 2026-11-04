@@ -52,6 +52,7 @@ type CanvasNodeProps = {
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onRefreshVideo?: (node: CanvasNodeData) => Promise<void>;
     onSelectReference?: (nodeId: string) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
@@ -75,6 +76,7 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onRefreshVideo?: (node: CanvasNodeData) => Promise<void>;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onMoveStart?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -114,6 +116,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onSetBatchPrimary,
     onRetry,
     onViewImage,
+    onRefreshVideo,
     onSelectReference,
     onContextMenu,
 }: CanvasNodeProps) {
@@ -418,6 +421,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onStopEditing={() => setIsEditingContent(false)}
                             onRetry={onRetry}
                             onViewImage={onViewImage}
+                            onRefreshVideo={onRefreshVideo}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                             onMoveStart={(event) => onMouseDown(event, data.id)}
@@ -673,11 +677,27 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
     return content;
 }
 
-function VideoNodeContent({ node, theme, isSelected, onViewImage, onResize }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, isSelected, onViewImage, onRefreshVideo, onResize }: NodeContentRendererProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [mediaDurationMs, setMediaDurationMs] = useState(0);
     const [videoTime, setVideoTime] = useState(0);
+    const [clock, setClock] = useState(Date.now());
+    const [refreshing, setRefreshing] = useState(false);
+    const lastRefresh = useRef(0);
+    const isEnhancement = node.metadata?.model === "tencent-mps-superres";
+    const expired = isEnhancement && Boolean(node.metadata?.videoEnhancementExpiresAt && clock >= node.metadata.videoEnhancementExpiresAt);
+    useEffect(() => {
+        if (!isEnhancement) return;
+        const timer = setInterval(() => setClock(Date.now()), 30000);
+        return () => clearInterval(timer);
+    }, [isEnhancement]);
+    const refresh = () => {
+        if (!isEnhancement || expired || !onRefreshVideo || refreshing || Date.now() - lastRefresh.current < 10000) return;
+        lastRefresh.current = Date.now();
+        setRefreshing(true);
+        void onRefreshVideo(node).catch(() => undefined).finally(() => setRefreshing(false));
+    };
     const videoDuration = mediaDurationMs / 1000;
     const togglePlayback = () => {
         const video = videoRef.current;
@@ -690,11 +710,12 @@ function VideoNodeContent({ node, theme, isSelected, onViewImage, onResize }: No
         if (isSelected) videoRef.current?.focus({ preventScroll: true });
         else if (document.activeElement === videoRef.current) videoRef.current?.blur();
     }, [isSelected, node.metadata?.content]);
-    if (!node.metadata?.content)
+    if (expired || !node.metadata?.content)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
-                <span className="text-sm">空视频节点</span>
+                <span className="text-sm">{expired ? "增强结果已到期" : isEnhancement ? "视频暂不可用" : "空视频节点"}</span>
+                {expired ? <span className="text-xs opacity-60">请使用已下载的本地文件</span> : isEnhancement ? <button type="button" className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50" disabled={refreshing} onClick={(event) => { event.stopPropagation(); refresh(); }}>{refreshing ? "读取中…" : "重新读取"}</button> : null}
             </div>
         );
     const controlStyle = { background: theme.toolbar.panel, color: theme.toolbar.item };
@@ -706,8 +727,9 @@ function VideoNodeContent({ node, theme, isSelected, onViewImage, onResize }: No
     };
     return (
         <div className="relative h-full w-full overflow-hidden rounded-[18px] bg-black">
-            <video ref={videoRef} src={node.metadata.content} tabIndex={-1} playsInline className="h-full w-full object-contain outline-none" onLoadStart={() => { setVideoTime(0); setMediaDurationMs(0); }} onLoadedMetadata={(event) => { const video = event.currentTarget; setMediaDurationMs(Number.isFinite(video.duration) ? video.duration * 1000 : 0); if (video.currentSrc === video.src) onResize(node.id, video.videoWidth, video.videoHeight, undefined, node); }} onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onKeyDown={(event) => { if (isSelected && event.code === "Space") { event.preventDefault(); event.stopPropagation(); togglePlayback(); } }} />
+            <video ref={videoRef} src={node.metadata.content} tabIndex={-1} playsInline className="h-full w-full object-contain outline-none" onError={refresh} onLoadStart={() => { setVideoTime(0); setMediaDurationMs(0); }} onLoadedMetadata={(event) => { const video = event.currentTarget; setMediaDurationMs(Number.isFinite(video.duration) ? video.duration * 1000 : 0); if (video.currentSrc === video.src) onResize(node.id, video.videoWidth, video.videoHeight, undefined, node); }} onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onKeyDown={(event) => { if (isSelected && event.code === "Space") { event.preventDefault(); event.stopPropagation(); togglePlayback(); } }} />
             {mediaDurationMs > 0 ? <span className="pointer-events-none absolute left-2 top-2 z-20 flex h-7 items-center justify-center rounded-md px-2 text-[11px] font-medium opacity-70 backdrop-blur" style={controlStyle}>{new Date(mediaDurationMs).toISOString().slice(mediaDurationMs >= 3_600_000 ? 11 : 14, 19)}</span> : null}
+            {node.metadata.videoEnhancementExpiresAt ? <span className="pointer-events-none absolute right-2 top-2 z-20 rounded-md px-2 py-1 text-[11px] font-medium backdrop-blur" style={controlStyle}>24小时内下载</span> : null}
             <button type="button" title={isPlaying ? "暂停" : "播放"} aria-label={isPlaying ? "暂停" : "播放"} className={`${controlClassName} left-2`} style={controlStyle} onClick={(event) => { event.stopPropagation(); togglePlayback(); }} onMouseDown={keepVideoFocus} onDoubleClick={(event) => event.stopPropagation()}>
                 {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
             </button>

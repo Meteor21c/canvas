@@ -22,6 +22,8 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
+import { VideoEnhanceDialog } from "@/components/video/video-enhance-dialog";
+import { getVideoEnhancement, VIDEO_ENHANCE_MODEL } from "@/services/api/video-enhance";
 import { isKIEKlingV3Config, kieKlingOmniVariant, normalizeVideoResolutionValue } from "@/components/video-settings-panel";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -417,6 +419,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
     const [openDirectorNodeId, setOpenDirectorNodeId] = useState<string | null>(null);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
+    const [videoEnhanceSource, setVideoEnhanceSource] = useState<{ node: CanvasNodeData; url: string } | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [audioTrimNodeId, setAudioTrimNodeId] = useState<string | null>(null);
     const [audioTrimStart, setAudioTrimStart] = useState(0);
@@ -1733,6 +1736,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
             if (clickedNode?.type === CanvasNodeType.Group) {
                 setDialogNodeId(null);
+            } else if (clickedNode?.type === CanvasNodeType.Video && (isVideoEnhancementNode(clickedNode) || clickedNode.metadata?.content || ["loading", "stopping"].includes(clickedNode.metadata?.status || ""))) {
+                setDialogNodeId(null);
             } else if (clickedNode?.type === CanvasNodeType.Text) {
                 setDialogNodeId((current) => (current === clickedNodeId ? current : null));
             } else {
@@ -1918,7 +1923,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(node.id);
+            setDialogNodeId(null);
             return node.id;
         } catch (error) {
             console.error("Upload video node failed:", error);
@@ -2405,7 +2410,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: director.id, toNodeId: node.id }]);
                 setSelectedNodeIds(new Set([node.id]));
                 setSelectedConnectionId(null);
-                setDialogNodeId(node.id);
+                setDialogNodeId(null);
                 message.success("视频已发送到画布");
             } catch (error) {
                 console.error("Send director video to canvas failed:", error);
@@ -2417,18 +2422,38 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [message],
     );
 
+    const refreshVideoNode = useCallback(async (node: CanvasNodeData) => {
+        if (!isVideoEnhancementNode(node)) return node;
+        const owner = useUserStore.getState().token;
+        const updated = await refreshVideoEnhancementNode(node);
+        if (owner !== useUserStore.getState().token) throw new Error("登录状态已变化");
+        setNodes((prev) => prev.map((item) => item.id === node.id && item.metadata?.videoTaskId === node.metadata?.videoTaskId ? { ...item, metadata: { ...item.metadata, ...updated.metadata } } : item));
+        return updated;
+    }, []);
+
+    const viewNodeMedia = useCallback(async (node: CanvasNodeData) => {
+        try {
+            const available = await refreshVideoNode(node);
+            if (videoEnhancementExpired(available)) throw new Error("增强结果已到期，请使用已下载的本地文件");
+            if (!available.metadata?.content) throw new Error("视频暂不可用，请稍后重试");
+            setPreviewNodeId(node.id);
+        } catch (error) { message.error(error instanceof Error ? error.message : "视频读取失败"); }
+    }, [message, refreshVideoNode]);
+
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((!isCanvasImageNodeType(node.type) && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
         try {
             if (node.type === CanvasNodeType.Video) {
-                await downloadVideoFile(node.metadata.content, node.metadata.storageKey, `canvas-video-${node.id}.mp4`);
+                const available = await refreshVideoNode(node);
+                if (videoEnhancementExpired(available)) throw new Error("增强结果已到期，请使用已下载的本地文件");
+                await downloadVideoFile(available.metadata?.content || "", available.metadata?.storageKey, `canvas-video-${node.id}.mp4`);
                 return;
             }
             const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
             if (!url) throw new Error("素材不可用，请重新打开画布后重试");
             saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
         } catch (error) { message.error(error instanceof Error ? error.message : "下载失败，请稍后重试"); }
-    }, [message]);
+    }, [message, refreshVideoNode]);
 
     const disconnectNodeReference = useCallback((fromNodeId: string, toNodeId: string) => {
         setConnections((prev) => prev.filter((connection) => connection.fromNodeId !== fromNodeId || connection.toNodeId !== toNodeId));
@@ -2439,6 +2464,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const ownImage = isCanvasImageNodeType(node?.type) && Boolean(node?.metadata?.content) && (isPanoramaNodeType(node?.type) || effectiveConfig.nodeRegenerateBehavior !== "overwrite");
         return buildNodeGenerationInputs(nodeId, nodesRef.current, connectionsRef.current).filter((input) => input.type === "image").length + Number(ownImage);
     }, [effectiveConfig.nodeRegenerateBehavior]);
+
+    const referenceImageLimit = useCallback(async (node: CanvasNodeData) => {
+        const kind = node.type === CanvasNodeType.Video ? "video" : "image";
+        const config = buildGenerationConfig(effectiveConfig, node, kind);
+        const channelId = (kind === "video" ? config.videoChannelId : config.imageChannelId) || config.activeChannelId;
+        const token = useUserStore.getState().token;
+        if (!channelId.startsWith("meteor-key-") || !token) return 10;
+        const capabilities = await fetchMeteorCapabilities({ kind, channelId, model: config.model }, token);
+        const policy = capabilities.videoInput;
+        const frames = Number(Boolean(policy?.firstFrame)) + Number(Boolean(policy?.lastFrame));
+        return Math.min(10, policy ? Math.max(policy.referenceLimits.images, frames) : capabilities.maxReferences);
+    }, [effectiveConfig]);
 
     const startNodeReferenceSelection = useCallback((nodeId: string, allowedKinds?: CanvasResourceKind[]) => {
         setReferencePickerKinds(allowedKinds);
@@ -2458,16 +2495,23 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         setReferencePickerKinds(undefined);
     }, [referencePickerNodeId]);
 
-    const selectNodeReference = useCallback((fromNodeId: string) => {
+    const selectNodeReference = useCallback(async (fromNodeId: string) => {
         if (!referencePickerNodeId || referenceConnectedNodeIds.has(fromNodeId)) return;
         const source = nodesRef.current.find((node) => node.id === fromNodeId);
         if (!source || !isCanvasReferenceNode(source) || (referencePickerKinds && !referencePickerKinds.includes(canvasReferenceKind(source)!))) return;
         const target = nodesRef.current.find((node) => node.id === referencePickerNodeId);
-        if (isImageReferenceTarget(target) && isCanvasImageNodeType(source.type) && referenceImageCount(referencePickerNodeId) >= 4) return message.warning("参考图片最多4张");
+        if (!target) return;
+        if (isCanvasImageNodeType(source.type) && (isImageReferenceTarget(target) || target.type === CanvasNodeType.Video)) {
+            try {
+                const limit = await referenceImageLimit(target);
+                if (referenceImageCount(referencePickerNodeId) >= limit) return message.warning(`当前模型最多使用${limit}张参考图`);
+            } catch { return message.error("参考图数量限制读取失败，请重试"); }
+        }
+        if (!nodesRef.current.some((node) => node.id === target.id) || connectionsRef.current.some((connection) => connection.fromNodeId === fromNodeId && connection.toNodeId === referencePickerNodeId)) return;
         const next = [...connectionsRef.current, { id: nanoid(), fromNodeId, toNodeId: referencePickerNodeId }];
         connectionsRef.current = next;
         setConnections(next);
-    }, [message, referenceConnectedNodeIds, referenceImageCount, referencePickerNodeId, referencePickerKinds]);
+    }, [message, referenceConnectedNodeIds, referenceImageCount, referenceImageLimit, referencePickerNodeId, referencePickerKinds]);
 
     useEffect(() => {
         if (!referencePickerNodeId) return;
@@ -2517,6 +2561,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 
     const uploadNodeMediaToCloud = useCallback(async (node: CanvasNodeData) => {
+        if (isVideoEnhancementNode(node)) return message.info("增强结果请在24小时内保存到本地");
         if ((node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content || node.metadata.storageKey?.startsWith("server:") || uploadingMediaNodeIdsRef.current.has(node.id)) return;
         uploadingMediaNodeIdsRef.current.add(node.id);
         const isAudio = node.type === CanvasNodeType.Audio;
@@ -2596,6 +2641,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
+            if (isVideoEnhancementNode(node)) return message.info("增强结果请在24小时内保存到本地");
             if (node.type === CanvasNodeType.Text) {
                 const content = node.metadata?.content?.trim();
                 if (!content) return message.error("没有可保存的文本");
@@ -2984,7 +3030,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         setNodes((prev) => (nodeTaskRunsRef.current.get(targetNodeId)?.preparing || nodeTaskRunsRef.current.get(targetNodeId)?.generation || nodeTaskRunsRef.current.get(targetNodeId)?.controller) === targetToken && prev.some((node) => node.id === targetNodeId) ? prev.map((node) => (node.id === targetNodeId ? { ...node, type: CanvasNodeType.Video, title: file.name, position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { ...node.metadata, ...videoMetadata(video), clientTaskId: undefined, taskBackend: undefined, errorDetails: undefined } } : node)) : prev);
                         setSelectedNodeIds(new Set([targetNodeId]));
                         setSelectedConnectionId(null);
-                        setDialogNodeId(targetNodeId);
+                        setDialogNodeId(null);
                     } else if (image && canApplyUpload) {
                         const size = fitNodeSize(image.width, image.height);
                         setNodes((prev) => (nodeTaskRunsRef.current.get(targetNodeId)?.preparing || nodeTaskRunsRef.current.get(targetNodeId)?.generation || nodeTaskRunsRef.current.get(targetNodeId)?.controller) === targetToken && prev.some((node) => node.id === targetNodeId) ?
@@ -3122,6 +3168,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            if (sourceNode && isVideoEnhancementNode(sourceNode)) return message.info("请通过“增强画质”创建新的增强任务");
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             const workflowRef = mode === "text" ? undefined : sourceNode?.metadata?.workflowRef;
             if (workflowRef && !useUserStore.getState().token) {
@@ -3543,6 +3590,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 }
 
                 if (mode === "video") {
+                    setDialogNodeId(null);
                     const videoGenerationConfig = workflowRef ? generationConfig : withCanvasVideoAdvancedConfig(generationConfig, generationContext);
                     const frameReferencesEnabled = Boolean(workflowRef) || videoGenerationConfig.channelMode === "remote" || (videoGenerationConfig.channelMode === "local" && Boolean(useUserStore.getState().token)) || supportsVideoFrameReferences(videoGenerationConfig.model, channelProtocolForConfig(videoGenerationConfig));
                     const firstFrame = frameReferencesEnabled ? generationContext.firstFrame : null;
@@ -4067,7 +4115,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         metadata.imageResolution = generationConfig.imageResolution;
                         const count = typeof args.count === "number" ? args.count : 1;
                         if (!Number.isInteger(count) || count < 1 || count > 4) return { ok: false, code: "invalid_count", message: "每次只能生成 1–4 张图片" };
-                        if (sourceNodes.filter(node => isCanvasImageNodeType(node.type)).length > 4) return { ok: false, code: "too_many_references", message: "参考图片最多 4 张" };
+                        if (sourceNodes.filter(node => isCanvasImageNodeType(node.type)).length > 10) return { ok: false, code: "too_many_references", message: "参考图片最多10张" };
                         metadata.count = count;
                     }
                     if (mode === "video") {
@@ -4171,6 +4219,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {
+            if (isVideoEnhancementNode(node)) return message.info("请通过“增强画质”创建新的增强任务");
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const retryWorkflowRef = node.metadata?.workflowRef;
             const batchPrimaryId = retryWorkflowRef && isCanvasImageNodeType(node.type) && node.metadata?.isBatchRoot ? node.metadata.primaryImageId : undefined;
@@ -4432,14 +4481,15 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         const node = nodesRef.current.find((item) => item.id === target.nodeId);
         if (!node) throw new Error("原节点已移除，请重新选择");
         if (target.allowedKinds && !target.allowedKinds.includes(payload.kind)) throw new Error("当前模型不支持这种参考素材");
-        if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
         referenceInsertBusyRef.current = true;
         try {
+            const limit = payload.kind === "image" && (isImageReferenceTarget(node) || node.type === CanvasNodeType.Video) ? await referenceImageLimit(node) : 10;
+            if (payload.kind === "image" && referenceImageCount(node.id) >= limit) throw new Error(`当前模型最多使用${limit}张参考图`);
             const id = `reference-${nanoid()}`;
             const index = connectionsRef.current.filter((connection) => connection.toNodeId === node.id).length;
             await insertAssetAtRef.current(payload, { x: node.position.x - 360 - Math.floor(index / 3) * 720, y: node.position.y + (index % 3) * 720 }, id);
             if (!owner.current() || !nodesRef.current.some((item) => item.id === node.id)) return;
-            if (isImageReferenceTarget(node) && payload.kind === "image" && referenceImageCount(node.id) >= 4) throw new Error("参考图片最多4张");
+            if (payload.kind === "image" && referenceImageCount(node.id) >= limit) throw new Error(`当前模型最多使用${limit}张参考图`);
             const next = [...connectionsRef.current, { id: nanoid(), fromNodeId: id, toNodeId: node.id }];
             connectionsRef.current = next;
             setConnections(next);
@@ -4447,7 +4497,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSelectedConnectionId(null);
             setDialogNodeId(node.id);
         } finally { referenceInsertBusyRef.current = false; }
-    }, [captureUploadOwner, referenceImageCount]);
+    }, [captureUploadOwner, referenceImageCount, referenceImageLimit]);
 
     const handleAddReference = useCallback((nodeId: string, source: "upload" | "assets", allowedKinds?: CanvasResourceKind[]) => {
         if (source === "assets") {
@@ -4472,7 +4522,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         if (referenceUploadBusyRef.current) return message.info("请等待参考素材上传完成");
         if (files.length > 20) return message.warning("每批最多上传20个素材");
         const node = nodesRef.current.find((item) => item.id === target.nodeId);
-        if (isImageReferenceTarget(node) && files.filter((file) => file.type.startsWith("image/")).length + referenceImageCount(target.nodeId) > 4) return message.warning("参考图片最多4张，请减少选择数量");
+        if (node && (isImageReferenceTarget(node) || node.type === CanvasNodeType.Video)) {
+            try {
+                const limit = await referenceImageLimit(node);
+                if (files.filter((file) => file.type.startsWith("image/")).length + referenceImageCount(target.nodeId) > limit) return message.warning(`当前模型最多使用${limit}张参考图，请减少选择数量`);
+            } catch { return message.error("参考图数量限制读取失败，请重试"); }
+        }
         const owner = captureUploadOwner();
         referenceUploadBusyRef.current = true;
         const hideLoading = message.loading("正在添加参考素材...", 0);
@@ -4506,7 +4561,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             referenceUploadBusyRef.current = false;
             hideLoading();
         }
-    }, [captureUploadOwner, insertReferenceAsset, message, referenceImageCount]);
+    }, [captureUploadOwner, insertReferenceAsset, message, referenceImageCount, referenceImageLimit]);
 
     const handleAssetInsert = useCallback(async (payload: InsertAssetPayload) => {
         try {
@@ -4681,7 +4736,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             isConnectionTarget={connectionTargetNodeId === node.id}
                             isConnecting={Boolean(connectingParams)}
                             referenceSelectionState={!referencePickerNodeId ? undefined : node.id === referencePickerNodeId ? "target" : referenceConnectedNodeIds.has(node.id) || !isCanvasReferenceNode(node) || (referencePickerKinds && !referencePickerKinds.includes(canvasReferenceKind(node)!)) ? "disabled" : "available"}
-                            showPanel={dialogNodeId === node.id && !selectionBox}
+                            showPanel={dialogNodeId === node.id && !selectionBox && !isVideoEnhancementNode(node)}
                             batchCount={batchChildCountById.get(node.id) || 0}
                             groupChildCount={groupChildCountById.get(node.id) || 0}
                             isGroupDropTarget={dropTargetGroupId === node.id}
@@ -4717,6 +4772,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                                             else void handleGenerateNode(nodeId, mode, prompt);
                                         }}
                                         onStop={handleStopNode}
+                                        onClose={() => setDialogNodeId(null)}
                                         onDisconnectReference={disconnectNodeReference}
                                         onStartReferenceSelection={startNodeReferenceSelection}
                                         onAddReference={handleAddReference}
@@ -4761,7 +4817,8 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             onToggleBatch={toggleBatchExpanded}
                             onSetBatchPrimary={setBatchPrimary}
                             onRetry={(node) => void handleRetryNode(node)}
-                            onViewImage={(node) => setPreviewNodeId(node.id)}
+                            onViewImage={(node) => void viewNodeMedia(node)}
+                            onRefreshVideo={(node) => refreshVideoNode(node).then(() => undefined)}
                             onSelectReference={selectNodeReference}
                             onContextMenu={(event, id) => {
                                 event.preventDefault();
@@ -4824,17 +4881,30 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 ) : null}
 
                 <CanvasNodeHoverToolbar
-                    node={isNodeDragging || nodeImageSettingsOpen ? null : toolbarNode}
+                    node={isNodeDragging || nodeImageSettingsOpen || (toolbarNode?.type === CanvasNodeType.Video && dialogNodeId === toolbarNode.id) ? null : toolbarNode}
                     viewport={viewport}
                     onKeep={keepNodeToolbar}
                     onLeave={hideNodeToolbar}
                     onInfo={(node) => setInfoNodeId(node.id)}
                     onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
                     onIncreaseFont={(node) => handleFontSizeChange(node.id, Math.min(32, (node.metadata?.fontSize || 14) + 2))}
-                    onToggleDialog={(node) => setDialogNodeId((current) => (current === node.id ? null : node.id))}
+                    onToggleDialog={(node) => { if (!isVideoEnhancementNode(node)) setDialogNodeId((current) => (current === node.id ? null : node.id)); }}
                     onGenerateImage={generateImageFromTextNode}
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onExtractAudio={(node) => void extractAudio(node)}
+                    onStop={handleStopNode}
+                    onEnhanceVideo={(node) => {
+                        if (isVideoEnhancementNode(node)) return message.info("如需再次增强，请下载后重新上传");
+                        setDialogNodeId(null);
+                        setToolbarNodeId(null);
+                        void refreshVideoNode(node).then((available) => {
+                            if (videoEnhancementExpired(available)) throw new Error("增强结果已到期，请使用已下载的本地文件");
+                            return resolveMediaUrl(available.metadata?.storageKey, available.metadata?.content);
+                        }).then((url) => {
+                            if (!url) throw new Error("视频不可用，请重新打开画布后重试");
+                            setVideoEnhanceSource({ node, url });
+                        }).catch((error) => message.error(error instanceof Error ? error.message : "视频读取失败"));
+                    }}
                     onTrimAudio={(node) => setAudioTrimNodeId(node.id)}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
@@ -4851,7 +4921,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     onUpscale={(node) => setUpscaleNodeId(node.id)}
                     onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
                     onAngle={(node) => setAngleNodeId(node.id)}
-                    onViewImage={(node) => setPreviewNodeId(node.id)}
+                    onViewImage={(node) => void viewNodeMedia(node)}
                     onReversePrompt={createImageReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
@@ -4953,6 +5023,33 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 <input ref={referenceInputRef} type="file" multiple className="hidden" onChange={handleReferenceInputChange} aria-label="上传参考素材" />
 
                 <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} />
+                <VideoEnhanceDialog
+                    open={Boolean(videoEnhanceSource)}
+                    sourceVideoUrl={videoEnhanceSource?.url}
+                    onClose={() => setVideoEnhanceSource(null)}
+                    onCompleted={({ taskId, videoUrl, prompt, expiresAt, resolution, frameRate }) => {
+                        const source = videoEnhanceSource?.node;
+                        if (!source) return;
+                        const id = `enhanced-video-${nanoid()}`;
+                        setNodes((prev) => [...prev, {
+                            id, type: CanvasNodeType.Video, title: `${source.title || "视频"} · 增强`,
+                            position: { x: source.position.x + source.width + 96, y: source.position.y },
+                            width: source.width, height: source.height,
+                            metadata: {
+                                content: videoUrl, prompt, status: "success", model: "tencent-mps-superres",
+                                mimeType: "video/mp4", progress: 100, videoTaskId: taskId, taskBackend: "account",
+                                seconds: source.metadata?.seconds, size: source.metadata?.size, vquality: resolution,
+                                videoEnhancementFrameRate: frameRate,
+                                videoEnhancementExpiresAt: expiresAt,
+                            },
+                        }]);
+                        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: source.id, toNodeId: id }]);
+                        setSelectedNodeIds(new Set([id]));
+                        setSelectedConnectionId(null);
+                        setDialogNodeId(null);
+                        setVideoEnhanceSource(null);
+                    }}
+                />
 
                 <Modal
                     title="截取音频"
@@ -5086,6 +5183,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                             isPanorama={activeItemNode.type === CanvasNodeType.Panorama}
                             proxyGeneratedPanorama={activeItemNode.type === CanvasNodeType.Panorama && Boolean(activeItemNode.metadata?.imageTaskId || activeItemNode.metadata?.imageTaskResultId) && !activeItemNode.metadata?.storageKey}
                             onDownload={() => downloadNodeImage(activeItemNode)}
+                            onVideoError={isVideoEnhancementNode(activeItemNode) ? () => { void refreshVideoNode(activeItemNode).catch(() => undefined); } : undefined}
                             onClose={() => setPreviewNodeId(null)}
                             hasPrev={currentIndex > 0}
                             hasNext={currentIndex < group.length - 1}
@@ -5149,8 +5247,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     );
 }
 
-function FullscreenPreview({ src: source, storageKey, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; storageKey?: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
+function FullscreenPreview({ src: source, storageKey, alt, isVideo, isPanorama, proxyGeneratedPanorama = false, onDownload, onVideoError, onClose, hasPrev, hasNext, onPrev, onNext }: { src: string; storageKey?: string; alt: string; isVideo?: boolean; isPanorama?: boolean; proxyGeneratedPanorama?: boolean; onDownload: () => void; onVideoError?: () => void; onClose: () => void; hasPrev?: boolean; hasNext?: boolean; onPrev?: () => void; onNext?: () => void }) {
     const src = useMediaUrl(storageKey, source, isVideo ? "media" : "image");
+    const lastVideoRefresh = useRef(0);
     const [zoom, setZoom] = useState<number>(1);
     const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
     const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -5264,6 +5363,7 @@ function FullscreenPreview({ src: source, storageKey, alt, isVideo, isPanorama, 
                         tabIndex={-1}
                         playsInline
                         preload="metadata"
+                        onError={() => { if (onVideoError && Date.now() - lastVideoRefresh.current >= 10000) { lastVideoRefresh.current = Date.now(); onVideoError(); } }}
                         onLoadStart={() => { setVideoDuration(0); setVideoTime(0); setIsVideoPlaying(false); }}
                         onDurationChange={(event) => setVideoDuration(event.currentTarget.duration)}
                         onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)}
@@ -5690,6 +5790,7 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     const restored = await Promise.allSettled(
         nodes.map(async (node) => {
+            if (isVideoEnhancementNode(node)) return refreshVideoEnhancementNode(node);
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
             if (!isCanvasImageNodeType(node.type)) return node;
@@ -5707,6 +5808,25 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
         }),
     );
     return restored.map((result, index) => result.status === "fulfilled" ? result.value : nodes[index]);
+}
+
+function isVideoEnhancementNode(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Video && node.metadata?.model === VIDEO_ENHANCE_MODEL;
+}
+
+function videoEnhancementExpired(node: CanvasNodeData) {
+    return isVideoEnhancementNode(node) && Boolean(node.metadata?.videoEnhancementExpiresAt && Date.now() >= node.metadata.videoEnhancementExpiresAt);
+}
+
+async function refreshVideoEnhancementNode(node: CanvasNodeData): Promise<CanvasNodeData> {
+    if (!isVideoEnhancementNode(node) || !node.metadata?.videoTaskId) return node;
+    if (videoEnhancementExpired(node)) return { ...node, metadata: { ...node.metadata, content: undefined, status: "success" } };
+    const owner = useUserStore.getState().token;
+    const task = await getVideoEnhancement(node.metadata.videoTaskId, "", false);
+    if (owner !== useUserStore.getState().token) throw new Error("登录状态已变化");
+    const expiresAt = Date.parse(task.expiresAt || task.expires_at || "") || (task.completed_at ? Date.parse(task.completed_at) + 86400000 : 0) || node.metadata.videoEnhancementExpiresAt;
+    const expired = ["expired", "result_expired"].includes(task.status || "") || Boolean(expiresAt && Date.now() >= expiresAt);
+    return { ...node, metadata: { ...node.metadata, content: expired ? undefined : task.video_url || task.url || node.metadata.content, status: "success", videoEnhancementExpiresAt: expiresAt || (expired ? Date.now() : undefined) } };
 }
 
 function syncAssistantReferences(sessions: CanvasAssistantSession[], nodes: CanvasNodeData[], restoreInterrupted = false, previousNode?: CanvasNodeData) {

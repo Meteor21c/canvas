@@ -27,8 +27,8 @@ test("image count and references reject before any network request", async () =>
     const request = spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected network"));
     for (const count of ["0", "5", "1.5"]) await expect(createCanvasImageTask({ ...config, count }, "mock", [])).rejects.toThrow("最多生成 4 张");
     await expect(createCanvasImageTask({ ...config, seedCount: 5 }, "mock", [])).rejects.toThrow("最多生成 4 张");
-    const refs = Array.from({ length: 5 }, (_, i) => ({ id: String(i), name: "mock.png", type: "image/png", dataUrl: "" }));
-    await expect(createCanvasImageTask(config, "mock", refs)).rejects.toThrow("参考图最多 4 张");
+    const refs = Array.from({ length: 11 }, (_, i) => ({ id: String(i), name: "mock.png", type: "image/png", dataUrl: "" }));
+    await expect(createCanvasImageTask(config, "mock", refs)).rejects.toThrow("参考图最多 10 张");
     expect(request).not.toHaveBeenCalled();
 });
 

@@ -28,6 +28,9 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 	if err := meteorValidateValues(input, 1); err != nil {
 		return nil, err
 	}
+	if readStringPath(input, "model") == "tencent-mps-superres" {
+		return meteorEnhancementBody(input)
+	}
 	for _, field := range []string{"draft_task_id", "omni_reference_task_type", "content", "elements", "element_list", "video_list", "image_list"} {
 		if value, ok := input[field]; ok && value != nil {
 			return nil, errors.New("当前画布暂不支持此视频参数：" + field)
@@ -189,8 +192,8 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if len(refs)+meteorReferenceCount(first)+meteorReferenceCount(last) > 4 {
-		return nil, errors.New("视频参考素材最多4个")
+	if len(refs)+meteorReferenceCount(first)+meteorReferenceCount(last) > 10 {
+		return nil, errors.New("视频参考素材最多10个")
 	}
 	if readStringPath(out, "model") == "doubao-seedance-2.5" && first != "" && out["aspect_ratio"] == "" {
 		out["aspect_ratio"] = "adaptive"
@@ -213,6 +216,15 @@ func meteorVideoBody(raw []byte) ([]byte, error) {
 }
 
 func meteorPrepareVideoBody(ctx context.Context, input map[string]any) ([]byte, error) {
+	if readStringPath(input, "model") == "tencent-mps-superres" {
+		frameRate, _ := strconv.Atoi(toMeteorString(input["frameRate"]))
+		url, duration, err := service.MeteorPrepareEnhancementSource(ctx, readStringPath(input, "url"), frameRate)
+		if err != nil {
+			return nil, err
+		}
+		input["url"], input["sourceDurationSeconds"] = url, duration
+		return json.Marshal(input)
+	}
 	refs := []string{}
 	if values, ok := input["reference_images"].([]any); ok {
 		for _, entry := range values {
@@ -237,7 +249,38 @@ func meteorPrepareVideoBody(ctx context.Context, input map[string]any) ([]byte, 
 	if materials.LastFrame != "" {
 		input["end_image_url"] = materials.LastFrame
 	}
+	if materials.Model == "MiniMax-H3" {
+		input["inputImageCount"] = materials.InputImageCount
+		input["inputVideoSeconds"] = materials.InputVideoSeconds
+	}
 	return json.Marshal(input)
+}
+
+func meteorEnhancementBody(input map[string]any) ([]byte, error) {
+	allowed := map[string]bool{"model": true, "url": true, "resolution": true, "frameRate": true, "sourceDurationSeconds": true}
+	for field := range input {
+		if !allowed[field] {
+			return nil, errors.New("视频增强不支持参数：" + field)
+		}
+	}
+	source, ok := input["url"].(string)
+	if !ok || strings.TrimSpace(source) == "" {
+		return nil, errors.New("请提供一个源视频")
+	}
+	resolution, ok := input["resolution"].(string)
+	if !ok {
+		return nil, errors.New("请选择视频增强清晰度")
+	}
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution != "720p" && resolution != "1080p" && resolution != "2k" && resolution != "4k" {
+		return nil, errors.New("视频增强清晰度无效")
+	}
+	frameRate, err := strconv.Atoi(toMeteorString(input["frameRate"]))
+	if err != nil || (frameRate != 30 && frameRate != 60 && frameRate != 120) {
+		return nil, errors.New("帧率档位须为30、60或120")
+	}
+	// Duration is re-probed from the owned source before submission.
+	return json.Marshal(map[string]any{"model": "tencent-mps-superres", "url": strings.TrimSpace(source), "resolution": resolution, "frameRate": frameRate})
 }
 
 func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
@@ -277,7 +320,8 @@ func meteorCreateVideo(w http.ResponseWriter, r *http.Request) {
 	duration, _ := strconv.Atoi(toMeteorString(input["duration"]))
 	audio, _ := input["audio"].(bool)
 	inputVideo := meteorVideoReference(input["reference_images"]) || meteorVideoReference(input["start_image_url"]) || meteorVideoReference(input["end_image_url"])
-	if err := service.ValidateMeteorVideo(r.Context(), user.ID, channel.ID, modelName, duration, readStringPath(input, "resolution"), audio, inputVideo); err != nil {
+	frameRate, _ := strconv.Atoi(toMeteorString(input["frameRate"]))
+	if err := service.ValidateMeteorVideoParameters(r.Context(), user.ID, service.MeteorQuoteInput{Kind: "video", Model: modelName, ChannelID: channel.ID, Duration: duration, Resolution: readStringPath(input, "resolution"), Audio: audio, InputVideo: inputVideo, FrameRate: frameRate}); err != nil {
 		FailWithStatus(w, 400, err.Error())
 		return
 	}
@@ -465,6 +509,9 @@ func meteorVideoContent(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	w.Header().Set("Cache-Control", "private, max-age=300")
+	if task.Model == "tencent-mps-superres" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	service.SetMeteorDownloadHeaders(w, r)
 	w.WriteHeader(response.StatusCode)

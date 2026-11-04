@@ -43,6 +43,9 @@ func TestMeteorVideoPricesSafeAndParameterMatched(t *testing.T) {
 			return
 		}
 		prices++
+		if r.URL.Query().Has("frame_rate") || r.URL.Query().Has("source_duration_seconds") {
+			t.Error("ordinary videos must not send invalid zero enhancement parameters")
+		}
 		if r.URL.Query().Get("duration") != "5" || r.URL.Query().Get("resolution") != "720p" || r.URL.Query().Get("audio") != "false" {
 			t.Error("quote parameters changed")
 		}
