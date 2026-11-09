@@ -9,3 +9,10 @@ export function proxy(request: NextRequest) {
     }
     return NextResponse.next();
 }
+
+// Only these pages need the standalone-login/admin fence. Matching API uploads
+// would make Next clone and truncate their streams at its default 10 MiB limit.
+// API authorization and route restrictions remain in app/api/[...path]/route.ts.
+export const config = {
+    matcher: ["/admin/:path*", "/login/:path*", "/register/:path*", "/auth/:path*"],
+};

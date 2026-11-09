@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { videoUploadFixture } from "./fixtures/meteor-upload-video.mjs";
 const base = process.env.CANVAS_BASE_URL || "http://127.0.0.1:3010";
 const owner = { Authorization: "Bearer meteor-ci-owner" };
 let ready = false;
@@ -12,7 +13,7 @@ for (const path of ["/studio", "/studio/canvas", "/studio/prompts", "/studio/ass
     assert.equal(r.status, 200, path);
     assert.equal(r.headers.get("x-content-type-options"), "nosniff", path);
 }
-for (const path of ["/studio/login", "/studio/admin", "/studio/admin/settings"]) assert.equal((await fetch(`${base}${path}`)).status, 404, path);
+for (const path of ["/studio/login", "/studio/register", "/studio/auth/callback", "/studio/admin", "/studio/admin/settings"]) assert.equal((await fetch(`${base}${path}`)).status, 404, path);
 for (const path of ["auth/login", "auth/register", "auth/linux-do/authorize", "admin/login", "admin/settings", "anonymous/files/session", "bridge/comfy/poll", "ai/direct-request", "v1/comfy-bridges"]) {
     const r = await fetch(`${base}/studio/api/${path}`, { method: "POST", headers: owner, body: "{}" });
     assert.equal(r.status, 403, path);
@@ -68,6 +69,24 @@ assert.equal((await nativeDownload.arrayBuffer()).byteLength, 44);
 const crossOwnerDownload = await fetch(`${base}/studio/api/v1/meteor/download`, { method: "POST", headers: { Authorization: "Bearer meteor-ci-outsider", "Content-Type": "application/json" }, body: JSON.stringify({ storageKey: uploaded.storageKey, filename: "stolen.wav" }) });
 assert.equal(crossOwnerDownload.status, 403);
 assert.equal((await fetch(`${base}/studio/api/v1/files/${encodeURIComponent(uploaded.id)}`, { method: "DELETE", headers: owner })).status, 200);
+// Upload through the actual compiled Next -> Go path. Page-only middleware
+// must not truncate media at 10 MiB or buffer the site's full 50 MiB allowance.
+for (const bytes of [12 * 1024 * 1024, 50 * 1024 * 1024]) {
+    const videoForm = new FormData();
+    videoForm.append("file", new Blob([videoUploadFixture(bytes)], { type: "video/mp4" }), "ci-upload-limit.mp4");
+    const response = await fetch(`${base}/studio/api/v1/files`, { method: "POST", headers: owner, body: videoForm });
+    assert.equal(response.status, 200, `${bytes} byte video must reach storage intact`);
+    const payload = await response.json();
+    assert.equal(payload.code, 0); assert.equal(payload.data.bytes, bytes);
+    assert.equal(payload.data.width, 16); assert.equal(payload.data.height, 16);
+    assert.ok(Math.abs(payload.data.durationSeconds - 1) < 0.05);
+    assert.ok(payload.data.storageKey.startsWith("server:"));
+}
+const oversizedVideo = new FormData();
+oversizedVideo.append("file", new Blob([videoUploadFixture(50 * 1024 * 1024 + 1)], { type: "video/mp4" }), "ci-over-limit.mp4");
+const rejectedVideo = await fetch(`${base}/studio/api/v1/files`, { method: "POST", headers: owner, body: oversizedVideo });
+assert.equal(rejectedVideo.status, 400, "media upload limit must still reject more than 50 MiB");
+assert.match((await rejectedVideo.json()).msg, /50 MiB/);
 const quote = async input => {
     const response = await fetch(`${base}/studio/api/v1/meteor/quote`, { method: "POST", headers: { ...owner, "Content-Type": "application/json" }, body: JSON.stringify(input) });
     return { status: response.status, body: await response.json() };
