@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Drawer, Tooltip } from "antd";
-import { ArrowLeft, Clock3, Home, Menu, PanelLeftClose, PanelLeftOpen, ReceiptText, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Clock3, Home, Menu, PanelLeftClose, PanelLeftOpen, ReceiptText, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -74,6 +74,7 @@ export function AppSideNav() {
                             {!compact ? <span>{label}</span> : null}
                         </Link>,
                     ))}
+                    {wrap("MCP 接入文档", <a href="/docs/mcp/" onClick={() => setMobileOpen(false)} className={cn(itemClass, idleItemClass, compact && "justify-center px-0")} aria-label={compact ? "MCP 接入文档" : undefined}><BookOpen className="size-4 shrink-0" aria-hidden="true" />{!compact ? <span>MCP 接入文档</span> : null}</a>)}
                 </nav>
 
                 <div className="flex shrink-0 flex-col gap-3">
