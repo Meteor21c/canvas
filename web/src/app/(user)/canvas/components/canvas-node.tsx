@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { ChevronRight, Image as ImageIcon, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { imageOutputWarning } from "@/lib/image-output-format";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useMediaUrl } from "@/hooks/use-media-url";
@@ -804,6 +805,7 @@ function ImageContent({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
+    const formatWarning = imageOutputWarning(node.metadata?.imageOutputFormat, node.metadata?.mimeType);
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -822,6 +824,7 @@ function ImageContent({
                     />
                 )}
             </div>
+            {formatWarning ? <div role="status" className="absolute inset-x-2 bottom-2 z-30 rounded-lg border px-2 py-1.5 text-xs" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>{formatWarning}</div> : null}
             {isBatchRoot ? (
                 <button
                     type="button"

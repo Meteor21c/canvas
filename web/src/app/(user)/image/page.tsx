@@ -30,6 +30,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
+import { imageOutputWarning } from "@/lib/image-output-format";
 
 import { ImageSettingsPanel, imageFormatLabel, imageQualityLabel, imageSizeLabel, imageSizeOptions } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -2232,6 +2233,7 @@ function FailedImageCard({ result, error, onCopyPrompt, onRetry }: { result: Gen
 
 function TaskInfo({ result, error, onCopyPrompt }: { result: GenerationResult; error?: string; onCopyPrompt: (text: string) => void | Promise<void> }) {
     const [expanded, setExpanded] = useState(false);
+    const formatWarning = imageOutputWarning(result.config.imageOutputFormat, result.image?.mimeType || result.task?.mimeType);
 
     return (
         <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
@@ -2259,6 +2261,7 @@ function TaskInfo({ result, error, onCopyPrompt }: { result: GenerationResult; e
                 {result.config.apiMode !== "chat" && result.config.streamImages ? <Tag className="m-0">流式 {result.config.streamPartialImages || "1"}</Tag> : null}
                 {result.durationMs ? <Tag className="m-0">{formatDuration(result.durationMs)}</Tag> : null}
             </div>
+            {formatWarning ? <div role="status" className="rounded-md bg-amber-50 px-2 py-1.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{formatWarning}</div> : null}
             {error ? <div className="rounded-md bg-red-100 px-2 py-1.5 text-red-600 dark:bg-red-950/40 dark:text-red-300">{error}</div> : null}
         </div>
     );
@@ -2307,6 +2310,7 @@ function HistoryLogCard({
 }) {
     const displayImages = log.images.filter((image) => Boolean(image.dataUrl));
     const firstImage = displayImages[0];
+    const formatWarning = imageOutputWarning(log.config.imageOutputFormat, firstImage?.mimeType || log.task?.mimeType);
     const [expanded, setExpanded] = useState(false);
     const [categoryOpen, setCategoryOpen] = useState(false);
     const [categoryName, setCategoryName] = useState("");
@@ -2348,7 +2352,7 @@ function HistoryLogCard({
                         </Tag>
                     ) : null}
                     <Tag className="m-0 text-[10px]" color={log.status === "生成中" ? "processing" : log.failCount ? "red" : "blue"}>
-                        {log.status === "生成中" ? "生成中" : log.failCount ? `失败 ${log.failCount}` : "成功"}
+                        {log.status === "生成中" ? "生成中" : log.failCount ? `失败 ${log.failCount}` : formatWarning ? "格式不符" : "成功"}
                     </Tag>
                     <Tag className="m-0 text-[10px]">{log.imageCount} 张</Tag>
                 </div>
@@ -2401,6 +2405,7 @@ function HistoryLogCard({
                     {log.config.apiMode !== "chat" && log.config.streamImages ? <Tag className="m-0 text-[10px]">流式 {log.config.streamPartialImages || "1"}</Tag> : null}
                     <Tag className="m-0 text-[10px]">{formatDuration(log.durationMs)}</Tag>
                 </div>
+                {formatWarning ? <div role="status" className="rounded-md bg-amber-50 px-2 py-1.5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{formatWarning}</div> : null}
                 {log.errors[0] ? (
                     <div className="flex items-start justify-between gap-2 rounded-md bg-red-100 px-2 py-1 text-red-600 dark:bg-red-950/40 dark:text-red-300">
                         <span className="line-clamp-2 min-w-0">{log.errors[0]}</span>

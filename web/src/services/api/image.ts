@@ -1,4 +1,5 @@
 import axios from "axios";
+import { GIF_ANIMATION_INSTRUCTION } from "@/lib/image-output-format";
 import { executeParameterTranslation, findParameterTranslation, normalizeTranslationAspectRatio, translationBody, translationHeaders, type TranslationInput } from "./channel-parameter-translation";
 
 import { isMiniMaxChannel, miniMaxModels } from "@/lib/minimax-video";
@@ -198,6 +199,7 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
 
 function applyImageGenerationOptions(body: Record<string, unknown>, config: AiConfig, params: ImageRequestParams) {
     if (config.imageOutputFormat === "gif") {
+        body.prompt = `${String(body.prompt || "")}\n\n${GIF_ANIMATION_INSTRUCTION}`;
         body.output_format = "gif";
         body.size = "auto";
         body.n = 1;

@@ -5,6 +5,7 @@ import { imageResolutionSelection, imageSizeAllowed, imageSizeTier, migrateImage
 import { pricingInputFromConfig } from "../src/lib/meteor-pricing";
 import { useUserStore } from "../src/stores/use-user-store";
 import { normalizeCanvasAgentAction } from "../src/app/(user)/canvas/agent/canvas-agent-tools";
+import { imageOutputWarning } from "../src/lib/image-output-format";
 
 const config = { ...defaultConfig, channelMode: "remote" as const, model: "gpt-image-2", imageModel: "gpt-image-2", imageChannelId: "meteor-test", activeChannelId: "meteor-test", quality: "high", count: "1", apiMode: "responses" as const, codexCli: "old-token" };
 const originalUser = useUserStore.getState();
@@ -30,6 +31,9 @@ test("GIF uses one auto-sized original output and rejects references before gene
     await createCanvasImageTask(gif, "mock", []);
     const body = JSON.parse(String(request.mock.calls[0][1]?.body));
     expect(body.request.output_format).toBe("gif");
+    expect(body.request.prompt).toStartWith("mock\n\n");
+    expect(body.request.prompt).toContain("looping animated GIF with multiple distinct frames");
+    expect(body.request.quality).toBe("high");
     expect(body.request.size).toBe("auto");
     expect(body.request.n).toBe(1);
     expect(body.request.stream).toBeUndefined();
@@ -37,6 +41,13 @@ test("GIF uses one auto-sized original output and rejects references before gene
     await expect(createCanvasImageTask({ ...gif, count: "2" }, "mock", [])).rejects.toThrow("GIF");
     await expect(createCanvasImageTask(gif, "mock", [{ id: "ref", name: "ref.png", type: "image/png", dataUrl: "" }])).rejects.toThrow("暂不支持参考图");
     expect(request).toHaveBeenCalledTimes(1);
+});
+
+test("GIF selection reports a returned PNG honestly without changing its format", () => {
+    expect(imageOutputWarning("gif", "image/png")).toBe("未返回 GIF 动图，已保留 PNG 原图。");
+    expect(imageOutputWarning("gif", "image/gif")).toBe("");
+    expect(imageOutputWarning("gif", undefined)).toBe("");
+    expect(imageOutputWarning("", "image/png")).toBe("");
 });
 
 test("image count and references reject before any network request", async () => {
