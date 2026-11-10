@@ -48,7 +48,7 @@ func TestMeteorCustomersKeepOwnKeysBalancesAndBilling(t *testing.T) {
 			data = []map[string]any{{"id": id, "name": "customer-group", "platform": "openai", "allow_image_generation": true}}
 		case "/api/v1/keys":
 			data = map[string]any{"total": 2, "items": []map[string]any{
-				{"id": id, "user_id": id, "group_id": id, "status": "active", "key": key},
+				{"id": id, "user_id": id, "group_id": id, "status": "active", "key": key, "name": "my-key-name"},
 				{"id": 9999, "user_id": 9999, "group_id": id, "status": "active", "key": "foreign-key"},
 			}}
 		case "/v1/models":
@@ -95,6 +95,9 @@ func TestMeteorCustomersKeepOwnKeysBalancesAndBilling(t *testing.T) {
 		public, err := MeteorPublicChannels(user.ID)
 		if err != nil || len(public) != 1 || public[0].ID != channel.ID {
 			t.Fatal("foreign model catalogue exposed")
+		}
+		if public[0].GroupID != id || public[0].GroupName != "customer-group" || public[0].Name != "my-key-name" {
+			t.Fatal("actual billing group was confused with a customer's API key name")
 		}
 		raw, _ := json.Marshal(public)
 		if strings.Contains(string(raw), "key-a") || strings.Contains(string(raw), "key-b") || strings.Contains(string(raw), "foreign-key") {

@@ -18,6 +18,8 @@ type ModelChannel struct {
 	ID           string          `json:"id"`
 	Protocol     string          `json:"protocol"`
 	Name         string          `json:"name"`
+	GroupID      int64           `json:"groupId,omitempty"`
+	GroupName    string          `json:"groupName,omitempty"`
 	BaseURL      string          `json:"baseUrl"`
 	APIKey       string          `json:"apiKey"`
 	Models       []string        `json:"models"`
@@ -120,6 +122,8 @@ type PublicModelChannelInfo struct {
 	ID                         string            `json:"id"`
 	Protocol                   string            `json:"protocol"`
 	Name                       string            `json:"name"`
+	GroupID                    int64             `json:"groupId,omitempty"`
+	GroupName                  string            `json:"groupName,omitempty"`
 	BaseURL                    string            `json:"baseUrl"`
 	Models                     []string          `json:"models"`
 	Weight                     int               `json:"weight"`

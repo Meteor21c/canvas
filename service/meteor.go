@@ -275,7 +275,7 @@ func MeteorChannels(userID string, force bool) ([]model.ModelChannel, error) {
 					caps[name] = capability
 				}
 				channelGroups[id+suffix] = group.ID
-				channels = append(channels, model.ModelChannel{ID: id + suffix, Protocol: protocol, Name: name, BaseURL: base, APIKey: key.Key, Models: names, ModelCapabilities: caps, Weight: 1, Timeout: 600, Enabled: true})
+				channels = append(channels, model.ModelChannel{ID: id + suffix, Protocol: protocol, Name: name, GroupID: group.ID, GroupName: group.Name, BaseURL: base, APIKey: key.Key, Models: names, ModelCapabilities: caps, Weight: 1, Timeout: 600, Enabled: true})
 			}
 			makeChannel("", "openai", append(textModels, imageModels...), "")
 			if len(channels) > 0 {
@@ -356,7 +356,7 @@ func MeteorPublicChannels(userID string) ([]model.PublicModelChannelInfo, error)
 	}
 	public := []model.PublicModelChannelInfo{}
 	for _, channel := range channels {
-		public = append(public, model.PublicModelChannelInfo{ID: channel.ID, Protocol: channel.Protocol, Name: channel.Name, BaseURL: "", Models: channel.Models, ModelCapabilities: channel.ModelCapabilities, Weight: 1, Timeout: 600, Enabled: true})
+		public = append(public, model.PublicModelChannelInfo{ID: channel.ID, Protocol: channel.Protocol, Name: channel.Name, GroupID: channel.GroupID, GroupName: channel.GroupName, BaseURL: "", Models: channel.Models, ModelCapabilities: channel.ModelCapabilities, Weight: 1, Timeout: 600, Enabled: true})
 	}
 	return public, nil
 }
