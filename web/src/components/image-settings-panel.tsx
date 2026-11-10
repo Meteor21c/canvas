@@ -34,7 +34,7 @@ export const imageSizeOptions = aspectOptions.map((item) => ({
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "imageResolution" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "imageResolution" | "imageOutputFormat" | "size" | "count" | "canvasImageCount", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     showSize?: boolean;
@@ -51,6 +51,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const activeSize = config.size || "auto";
     const resolution = imageSizeTier(activeSize) || normalizeImageResolution(config.imageResolution);
     const capabilities = useMeteorCapabilities({ kind: "image", model: config.model, channelId: config.imageChannelId || config.activeChannelId });
+    const gif = config.imageOutputFormat === "gif";
+    const supportsGIF = capabilities.data?.outputFormats?.includes("gif");
+    const selectFormat = (value: string) => {
+        onConfigChange("imageOutputFormat", value);
+        if (value === "gif") {
+            onConfigChange("count", "1");
+            onConfigChange("canvasImageCount", "1");
+        }
+    };
+    useEffect(() => {
+        if (gif && capabilities.data && !supportsGIF) onConfigChange("imageOutputFormat", "");
+    }, [capabilities.data, gif, supportsGIF]);
     const resolutions = imageResolutionOptions.filter(option => capabilities.data?.resolutions.some(value => value.toLowerCase() === option.value));
     const selectedAspect = aspectOptions.find(item => item.value === imageAspectRatio(activeSize));
     const dimensions = readSizeDimensions(resolveImageRequestSize(resolution, activeSize) || "", selectedAspect || aspectOptions[0]);
@@ -90,6 +102,14 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">图像设置</div> : null}
+                {supportsGIF ? <div className="space-y-2.5">
+                    <SettingTitle color={theme.node.muted}>输出格式</SettingTitle>
+                    <div className="grid grid-cols-2 gap-2.5">
+                        <OptionPill selected={!gif} theme={theme} onClick={() => selectFormat("")}>默认图片</OptionPill>
+                        <OptionPill selected={gif} theme={theme} onClick={() => selectFormat("gif")}>GIF 动图</OptionPill>
+                    </div>
+                </div> : null}
+                {gif ? <p className="text-xs" style={{ color: theme.node.muted }}>每次生成 1 张动图，尺寸自动，暂不支持参考图。请下载原文件保存。</p> : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
@@ -100,7 +120,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                 </div>
-                {showSize ? (
+                {showSize && !gif ? (
                     <>
                         <div className="space-y-2.5">
                             <SettingTitle color={theme.node.muted}>分辨率</SettingTitle>
@@ -148,7 +168,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>
                     </>
                 ) : null}
-                {showCount ? (
+                {showCount && !gif ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">

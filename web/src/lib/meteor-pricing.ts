@@ -12,11 +12,12 @@ export function pricingInputFromConfig(config: AiConfig, kind: PricingKind, sele
     const videoResolution = /^\d+$/.test(videoQuality) ? `${videoQuality}p` : videoQuality;
     const duration = Number(config.videoSeconds);
     const count = Number(selection.count ?? config.count);
-    const actualImageSize = resolveRequestSize(config.imageResolution, config.size);
-    const imageResolution = imageSizeTier(actualImageSize) || normalizeImageResolution(config.imageResolution);
+    const gif = kind === "image" && config.imageOutputFormat === "gif";
+    const actualImageSize = gif ? "auto" : resolveRequestSize(config.imageResolution, config.size);
+    const imageResolution = gif ? "1k" : imageSizeTier(actualImageSize) || normalizeImageResolution(config.imageResolution);
     return {
         kind, model, channelId,
-        count: kind === "video" ? 1 : Number.isInteger(count) && count > 0 ? count : 1,
+        count: kind === "video" || gif ? 1 : Number.isInteger(count) && count > 0 ? count : 1,
         resolution: kind === "video" ? model === "tencent-mps-superres" && !["720p", "1080p", "2k", "4k"].includes(videoResolution) ? "1080p" : model === "MiniMax-H3" && !["768p", "2k"].includes(videoResolution) ? "768p" : videoResolution : imageResolution,
         quality: normalizeQuality(config.quality),
         size: kind === "image" ? actualImageSize || "auto" : config.size,

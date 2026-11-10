@@ -333,6 +333,7 @@ export async function loadStorageConfig() {
 }
 
 function imageExtension(mimeType: string) {
+    if (mimeType === "image/gif") return "gif";
     if (mimeType === "image/jpeg") return "jpg";
     if (mimeType === "image/webp") return "webp";
     return "png";

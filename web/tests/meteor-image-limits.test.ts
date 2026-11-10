@@ -23,6 +23,22 @@ test("legacy image mode cannot replace Images or strip quality", async () => {
     expect(body.request.prompt).toBe("mock");
 });
 
+test("GIF uses one auto-sized original output and rejects references before generation", async () => {
+    useUserStore.setState({ token: "mock-image-owner", hydrateUser: async () => {} });
+    const request = spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ code: 0, data: { id: "mock-task", status: "processing" } }), { status: 200 }));
+    const gif = { ...config, model: "gpt-image-2.6", imageModel: "gpt-image-2.6", imageOutputFormat: "gif", size: "3840x2160", streamImages: "1" };
+    await createCanvasImageTask(gif, "mock", []);
+    const body = JSON.parse(String(request.mock.calls[0][1]?.body));
+    expect(body.request.output_format).toBe("gif");
+    expect(body.request.size).toBe("auto");
+    expect(body.request.n).toBe(1);
+    expect(body.request.stream).toBeUndefined();
+    expect(body.request.frame_count).toBeUndefined();
+    await expect(createCanvasImageTask({ ...gif, count: "2" }, "mock", [])).rejects.toThrow("GIF");
+    await expect(createCanvasImageTask(gif, "mock", [{ id: "ref", name: "ref.png", type: "image/png", dataUrl: "" }])).rejects.toThrow("暂不支持参考图");
+    expect(request).toHaveBeenCalledTimes(1);
+});
+
 test("image count and references reject before any network request", async () => {
     const request = spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected network"));
     for (const count of ["0", "5", "1.5"]) await expect(createCanvasImageTask({ ...config, count }, "mock", [])).rejects.toThrow("最多生成 4 张");

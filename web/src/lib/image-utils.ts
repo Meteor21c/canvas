@@ -51,6 +51,9 @@ export function readImageMeta(dataUrl: string) {
 }
 
 function detectImageFileType(bytes: Uint8Array) {
+    if (bytes.length >= 6 && /^GIF8[79]a$/.test(String.fromCharCode(...bytes.slice(0, 6)))) {
+        return { mimeType: "image/gif", extension: ".gif" };
+    }
     if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
         return { mimeType: "image/jpeg", extension: ".jpg" };
     }

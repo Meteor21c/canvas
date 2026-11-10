@@ -80,6 +80,42 @@ func TestMeteorVideoPricesSafeAndParameterMatched(t *testing.T) {
 	}
 }
 
+func TestMeteorGIFCapabilitiesUseSelectedKeyAndFailClosed(t *testing.T) {
+	enabled := true
+	user, channel := meteorPricingFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/capabilities" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer fixture-private-key" || r.URL.Query().Get("model") != "gpt-image-2.6" {
+			t.Error("wrong capability scope")
+		}
+		if !enabled {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, `{"output_formats":["gif","svg"],"private_provider":"hidden"}`)
+	})
+	channel.Models = append(channel.Models, "gpt-image-2.6")
+	channel.ModelCapabilities["gpt-image-2.6"] = "image"
+	meteorSessions.Lock()
+	meteorSessions.byUser[user].Channels = []model.ModelChannel{channel}
+	meteorSessions.Unlock()
+	cap, err := MeteorMediaCapabilities(context.Background(), user, "image", channel.ID, "gpt-image-2.6")
+	if err != nil || strings.Join(cap.OutputFormats, ",") != "gif" {
+		t.Fatal("GIF capability missing", err)
+	}
+	raw, _ := json.Marshal(cap)
+	if strings.Contains(string(raw), "hidden") || strings.Contains(string(raw), "fixture-private-key") {
+		t.Fatal("private capability leaked")
+	}
+	enabled = false
+	cap, err = MeteorMediaCapabilities(context.Background(), user, "image", channel.ID, "gpt-image-2.6")
+	if err != nil || len(cap.OutputFormats) != 0 {
+		t.Fatal("unavailable capability must fail closed", err)
+	}
+}
+
 func TestMeteorImageTokenAndTierPricesRemainHonest(t *testing.T) {
 	user, channel := meteorPricingFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/groups/available" {

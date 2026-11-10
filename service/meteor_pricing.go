@@ -121,6 +121,7 @@ type MeteorCapabilities struct {
 	ForcedProtocol string                  `json:"forcedProtocol"`
 	Watermark      bool                    `json:"watermark"`
 	Resolutions    []string                `json:"resolutions"`
+	OutputFormats  []string                `json:"outputFormats,omitempty"`
 	Duration       *MeteorDuration         `json:"duration"`
 	SupportsAudio  bool                    `json:"supportsAudio"`
 	AspectRatios   []string                `json:"aspectRatios"`
@@ -186,7 +187,7 @@ func meteorMultiply(value *float64, multiplier float64) *string {
 	return meteorNumber(*value * multiplier)
 }
 func meteorRawMain(ctx context.Context, channel model.ModelChannel, path string, target any) error {
-	if !strings.HasPrefix(path, "/v1/videos/pricing?") {
+	if !strings.HasPrefix(path, "/v1/videos/pricing?") && !strings.HasPrefix(path, "/v1/images/capabilities?") {
 		return errors.New("计价接口无效")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, channel.BaseURL+path, nil)
@@ -280,6 +281,16 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 		if channel.ModelCapabilities[modelName] != "image" || channel.Protocol != "openai" {
 			return cap, errors.New("当前模型未开放图片生成")
 		}
+		var formats struct {
+			OutputFormats []string `json:"output_formats"`
+		}
+		if strings.HasPrefix(strings.ToLower(modelName), "gpt-image-2.6") && meteorRawMain(ctx, channel, "/v1/images/capabilities?model="+url.QueryEscape(modelName), &formats) == nil {
+			for _, format := range formats.OutputFormats {
+				if format == "gif" {
+					cap.OutputFormats = []string{"gif"}
+				}
+			}
+		}
 		quote, quoteErr := meteorImageQuote(ctx, userID, channel, MeteorQuoteInput{Kind: "image", Model: modelName, ChannelID: channel.ID, Count: 1, Resolution: "1K"}, MeteorPrice{Kind: "image", Model: modelName, ChannelID: channel.ID})
 		if quoteErr == nil {
 			for _, tier := range []string{"1K", "2K", "4K"} {
@@ -291,7 +302,7 @@ func MeteorMediaCapabilities(ctx context.Context, userID, kind, channelID, model
 		// Resolutions describe a known model's accepted size tiers, not a fixed
 		// per-image total. Token tariffs keep all unknown totals null.
 		image2 := strings.ToLower(strings.TrimSpace(modelName))
-		if len(cap.Resolutions) == 0 && quoteErr == nil && quote.Available && quote.BillingMode == "token" && (image2 == "gpt-image-2" || strings.HasPrefix(image2, "gpt-image-2-")) {
+		if len(cap.Resolutions) == 0 && quoteErr == nil && quote.Available && quote.BillingMode == "token" && (image2 == "gpt-image-2" || strings.HasPrefix(image2, "gpt-image-2-") || strings.HasPrefix(image2, "gpt-image-2.")) {
 			cap.Resolutions = []string{"1K", "2K", "4K"}
 		}
 		cap.Available = true

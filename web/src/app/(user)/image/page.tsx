@@ -119,7 +119,7 @@ type GenerationLog = {
     lastPolledAt?: number;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "channelMode" | "model" | "imageModel" | "activeChannelId" | "imageChannelId" | "quality" | "imageResolution" | "size" | "count" | "apiMode" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli">;
+type GenerationLogConfig = Pick<AiConfig, "channelMode" | "model" | "imageModel" | "activeChannelId" | "imageChannelId" | "quality" | "imageResolution" | "imageOutputFormat" | "size" | "count" | "apiMode" | "streamImages" | "streamPartialImages" | "responseFormatB64Json" | "codexCli">;
 type RequestSnapshot = { text: string; requestConfig: AiConfig; displayConfig: GenerationLogConfig; references: ReferenceImage[]; workflowRef?: WorkflowRef };
 type GenerationCategory = { id: string; name: string; createdAt: number };
 type ResultViewMode = "all" | "category";
@@ -1569,6 +1569,15 @@ function WorkbenchPanel({
 }) {
     const [bottomSettingsCollapsed, setBottomSettingsCollapsed] = useState(true);
     const capabilities = useMeteorCapabilities({ kind: "image", model, channelId: config.imageChannelId || config.activeChannelId });
+    const gif = config.imageOutputFormat === "gif";
+    const supportsGIF = capabilities.data?.outputFormats?.includes("gif");
+    const selectFormat = (value: string) => {
+        updateConfig("imageOutputFormat", value);
+        if (value === "gif") { updateConfig("count", "1"); updateConfig("canvasImageCount", "1"); }
+    };
+    useEffect(() => {
+        if (gif && capabilities.data && !supportsGIF) updateConfig("imageOutputFormat", "");
+    }, [capabilities.data, gif, supportsGIF]);
     const resolution = imageSizeTier(config.size) || normalizeImageResolution(config.imageResolution);
     const resolutions = imageResolutionOptions.filter(option => capabilities.data?.resolutions.some(value => value.toLowerCase() === option.value));
     const selectResolution = (value: string) => {
@@ -1617,7 +1626,7 @@ function WorkbenchPanel({
                                 <Button title="切换到侧边工作台" icon={<PanelLeft className="size-4" />} onClick={() => onLayoutChange("side")} />
                             </div>
                         </div>
-                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-[minmax(0,1.8fr)_1fr_1fr_1fr_0.7fr_auto] ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
+                        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${gif ? "xl:grid-cols-[minmax(0,2fr)_1fr_1fr]" : supportsGIF ? "xl:grid-cols-[minmax(0,1.6fr)_0.8fr_0.8fr_0.9fr_0.8fr_0.6fr_auto]" : "xl:grid-cols-[minmax(0,1.8fr)_1fr_1fr_1fr_0.7fr_auto]"} ${bottomSettingsCollapsed ? "hidden lg:grid" : "grid"}`}>
                             <label className="grid gap-1 text-xs text-stone-500 dark:text-stone-400">
                                 模型
                                 <ModelPicker
@@ -1636,12 +1645,14 @@ function WorkbenchPanel({
                                     fullWidth
                                 />
                             </label>
-                            <QuickSelect label="分辨率" value={resolution} options={resolutions.length ? resolutions : imageResolutionOptions.filter(option => option.value === resolution)} onChange={selectResolution} />
-                            <QuickSelect label="画面比例" value={imageAspectRatio(config.size || "1:1")} options={imageSizeOptions.filter(option => imageSizeAllowed(model, resolveImageRequestSize(resolution, option.value)) || resolutions.some(tier => imageSizeAllowed(model, resolveImageRequestSize(tier.value, option.value))))} onChange={selectRatio} />
+                            {!gif ? <QuickSelect label="分辨率" value={resolution} options={resolutions.length ? resolutions : imageResolutionOptions.filter(option => option.value === resolution)} onChange={selectResolution} /> : null}
+                            {!gif ? <QuickSelect label="画面比例" value={imageAspectRatio(config.size || "1:1")} options={imageSizeOptions.filter(option => imageSizeAllowed(model, resolveImageRequestSize(resolution, option.value)) || resolutions.some(tier => imageSizeAllowed(model, resolveImageRequestSize(tier.value, option.value))))} onChange={selectRatio} /> : null}
+                            {supportsGIF ? <QuickSelect label="输出格式" value={gif ? "gif" : ""} options={[{ value: "", label: "默认图片" }, { value: "gif", label: "GIF 动图" }]} onChange={selectFormat} /> : null}
                             <QuickSelect label="质量" value={config.quality || "auto"} options={quickQualityOptions} onChange={(value) => updateConfig("quality", value)} />
-                            <QuickSelect label="数量" value={String(normalizedImageCount(config.count))} options={imageCountOptions} onChange={(value) => updateConfig("count", value)} />
-                            <ReferenceQuickActions references={references} onUploadReferences={onUploadReferences} />
+                            {!gif ? <QuickSelect label="数量" value={String(normalizedImageCount(config.count))} options={imageCountOptions} onChange={(value) => updateConfig("count", value)} /> : null}
+                            {!gif ? <ReferenceQuickActions references={references} onUploadReferences={onUploadReferences} /> : null}
                         </div>
+                        {gif ? <p className="text-xs text-stone-500 dark:text-stone-400">每次生成 1 张动图，尺寸自动，暂不支持参考图。请下载原文件保存。</p> : null}
                         {references.length || uploadingCount > 0 ? <ReferenceStrip className="mt-3" references={references} compact onRemoveReference={onRemoveReference} uploadingCount={uploadingCount} /> : null}
                         <div className="flex flex-col gap-3 border-t border-stone-200/70 pt-3 sm:flex-row sm:items-end sm:justify-between dark:border-stone-800">
                             <PriceSummary config={config} capability="image" model={model} count={normalizedImageCount(config.count)} compact className="min-w-0 flex-1" />
@@ -3000,6 +3011,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         imageModel: log.config?.imageModel || log.model || "",
         activeChannelId: taskChannelId || log.config?.activeChannelId || log.config?.imageChannelId || "",
         imageChannelId: taskChannelId || log.config?.imageChannelId || log.config?.activeChannelId || "",
+        imageOutputFormat: log.config?.imageOutputFormat || "",
         ...migrateImageSettings({ quality: log.config?.quality || log.quality, imageResolution: log.config?.imageResolution, size: log.config?.size || log.size }),
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
@@ -3033,6 +3045,7 @@ function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
         imageChannelId: config.imageChannelId,
         quality: config.quality,
         imageResolution: config.imageResolution,
+        imageOutputFormat: config.imageOutputFormat,
         size: config.size,
         count: config.count,
         apiMode: "images",
@@ -3045,6 +3058,7 @@ function buildGenerationLogConfig(config: AiConfig): GenerationLogConfig {
 
 function imageExtension(value: string) {
     const lower = value.toLowerCase();
+    if (lower.includes("gif")) return "gif";
     if (lower.includes("jpeg") || lower.includes("jpg")) return "jpg";
     if (lower.includes("webp")) return "webp";
     return "png";

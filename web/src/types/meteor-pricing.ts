@@ -20,6 +20,7 @@ export type PricingScenario = {
 };
 
 export type MeteorCapabilities = {
+    outputFormats?: string[];
     operation?: "enhance";
     frameRates?: number[];
     retentionHours?: number;

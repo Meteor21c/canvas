@@ -75,8 +75,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
                     <span className="truncate">
                         {effectiveShowSize ? (
                             <>
-                                {(imageSizeTier(activeSize) || normalizeImageResolution(config.imageResolution)).toUpperCase()} · {imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}
-                                {effectiveShowCount ? <> · {count} 张</> : null}
+                                {config.imageOutputFormat === "gif" ? "GIF 动图 · 自动尺寸 · 1 张" : <>{(imageSizeTier(activeSize) || normalizeImageResolution(config.imageResolution)).toUpperCase()} · {imageSizeLabel(activeSize)} · {imageQualityLabel(quality)}{effectiveShowCount ? <> · {count} 张</> : null}</>}
                             </>
                         ) : (
                             <>

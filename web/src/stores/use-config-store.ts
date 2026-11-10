@@ -77,6 +77,7 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     imageResolution: string;
+    imageOutputFormat: string;
     size: string;
     videoSize: string;
     count: string;
@@ -116,6 +117,7 @@ export const defaultConfig: AiConfig = {
     apiKey: "",
     model: "gpt-image-2",
     imageModel: "gpt-image-2",
+    imageOutputFormat: "",
     videoModel: "grok-imagine-video",
     textModel: "gpt-5.5",
     audioModel: "gpt-4o-mini-tts",

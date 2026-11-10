@@ -2497,7 +2497,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             }
             const url = await (isCanvasImageNodeType(node.type) ? resolveImageUrl : resolveMediaUrl)(node.metadata.storageKey, node.metadata.content);
             if (!url) throw new Error("素材不可用，请重新打开画布后重试");
-            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
+            saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.mimeType || url)}`);
         } catch (error) { message.error(error instanceof Error ? error.message : "下载失败，请稍后重试"); }
     }, [message, refreshVideoNode]);
 
@@ -4286,6 +4286,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         activeChannelId: savedImageMetadata.channelId || effectiveConfig.imageChannelId,
                         quality: savedImageMetadata.quality || effectiveConfig.quality,
                         imageResolution: savedImageMetadata.imageResolution || effectiveConfig.imageResolution || defaultConfig.imageResolution,
+                        imageOutputFormat: savedImageMetadata.imageOutputFormat || "",
                         size: isPanorama ? PANORAMA_IMAGE_SIZE : savedImageMetadata.size || effectiveConfig.size,
                         count: "1",
                     }
@@ -5740,6 +5741,7 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         size: config.size,
         quality: config.quality,
         imageResolution: config.imageResolution,
+        imageOutputFormat: config.imageOutputFormat,
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };
@@ -6378,6 +6380,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         audioChannelId,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         imageResolution: node?.metadata?.imageResolution || config.imageResolution || defaultConfig.imageResolution,
+        imageOutputFormat: node?.metadata?.imageOutputFormat ?? config.imageOutputFormat ?? "",
         size: isPanoramaNodeType(node?.type) ? PANORAMA_IMAGE_SIZE : node?.metadata?.size || (mode === "video" ? config.videoSize || defaultConfig.videoSize : config.size || defaultConfig.size),
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,

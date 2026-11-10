@@ -135,8 +135,8 @@ function createImageRequestParams(config: AiConfig): ImageRequestParams {
     const normalizedQuality = normalizeQuality(config.quality);
     const zhipu = isZhipuImageModel(config.model);
     const quality = zhipu ? normalizeZhipuImageQuality(config.model, normalizedQuality) : normalizedQuality;
-    const size = resolveRequestSize(config.imageResolution, config.size);
-    if (!imageSizeAllowed(config.model, size)) throw new ImageRequestError("当前尺寸不受此模型支持，请调整分辨率或画面比例");
+    const size = config.imageOutputFormat === "gif" ? "auto" : resolveRequestSize(config.imageResolution, config.size);
+    if (config.imageOutputFormat !== "gif" && !imageSizeAllowed(config.model, size)) throw new ImageRequestError("当前尺寸不受此模型支持，请调整分辨率或画面比例");
     return {
         n: normalizeBoundedInteger(config.count, 1, 1, 4),
         quality,
@@ -197,6 +197,13 @@ function applyImageGenerationParams(body: Record<string, unknown>, config: AiCon
 }
 
 function applyImageGenerationOptions(body: Record<string, unknown>, config: AiConfig, params: ImageRequestParams) {
+    if (config.imageOutputFormat === "gif") {
+        body.output_format = "gif";
+        body.size = "auto";
+        body.n = 1;
+        body.response_format = "b64_json";
+        return;
+    }
     if (isZhipuImageModel(config.model)) return;
     if (params.n > 1) body.n = params.n;
     if (config.responseFormatB64Json) body.response_format = "b64_json";
@@ -211,6 +218,10 @@ function assertImageReferencesSupported(model: string, references: ReferenceImag
 }
 
 function normalizeBase64Image(value: string, fallbackMime: string) {
+    const raw = value.replace(/^data:[^,]*,/, "");
+    if (raw.startsWith("R0lGODdh") || raw.startsWith("R0lGODlh")) return `data:image/gif;base64,${raw}`;
+    if (raw.startsWith("iVBORw0KGgo")) return `data:image/png;base64,${raw}`;
+    if (raw.startsWith("/9j/")) return `data:image/jpeg;base64,${raw}`;
     return value.startsWith("data:") ? value : `data:${fallbackMime};base64,${value}`;
 }
 
@@ -1568,6 +1579,7 @@ export async function deleteCanvasImageTask(config: AiConfig, task?: CanvasImage
 }
 
 function assertCustomerImageLimits(config: AiConfig & { seedCount?: number }, references: ReferenceImage[]) {
+    if (config.imageOutputFormat === "gif" && (references.length || Number(config.seedCount ?? config.count ?? 1) !== 1)) throw new ImageRequestError("GIF 动图每次生成 1 张，暂不支持参考图");
     if (references.length > 10) throw new ImageRequestError("参考图最多 10 张，请移除多余图片后重试");
     const count = Number(config.count || 1), batch = config.seedCount ?? count;
     if (!Number.isInteger(count) || count < 1 || count > 4 || !Number.isInteger(batch) || batch < 1 || batch > 4) throw new ImageRequestError("每次最多生成 4 张图片");
