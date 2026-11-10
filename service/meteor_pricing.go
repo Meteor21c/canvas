@@ -837,6 +837,10 @@ func meteorImageQuote(ctx context.Context, userID string, channel model.ModelCha
 					quote.EstimatedAmount = meteorNumber(*price * rate * float64(input.Count))
 					quote.Exact = true
 					quote.Notice = "按所选尺寸与数量计费。"
+					if strings.EqualFold(input.Size, "auto") && strings.EqualFold(input.Resolution, "auto") && len(quote.ImagePriceBySize) > 0 {
+						quote.SiteUnitPrice, quote.EstimatedAmount, quote.Exact = nil, nil, false
+						quote.Notice = "尺寸自动，按实际输出尺寸计费。"
+					}
 				}
 				return quote, nil
 			}

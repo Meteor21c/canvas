@@ -14,7 +14,7 @@ export function pricingInputFromConfig(config: AiConfig, kind: PricingKind, sele
     const count = Number(selection.count ?? config.count);
     const gif = kind === "image" && config.imageOutputFormat === "gif";
     const actualImageSize = gif ? "auto" : resolveRequestSize(config.imageResolution, config.size);
-    const imageResolution = gif ? "1k" : imageSizeTier(actualImageSize) || normalizeImageResolution(config.imageResolution);
+    const imageResolution = gif ? "auto" : imageSizeTier(actualImageSize) || normalizeImageResolution(config.imageResolution);
     return {
         kind, model, channelId,
         count: kind === "video" || gif ? 1 : Number.isInteger(count) && count > 0 ? count : 1,

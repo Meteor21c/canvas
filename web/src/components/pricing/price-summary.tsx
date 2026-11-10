@@ -38,18 +38,20 @@ export function QuoteDetails({ quote, count = 1, duration, resolution, compact =
     const rate = formatOfficialRate(quote.saleRateToOfficial);
     const unit = pricingUnit(quote.billingMode, quote.unit);
     const personal = quote.estimateSource === "personal";
+    const autoImage = quote.kind === "image" && resolution === "auto" && !quote.exact && Object.keys(quote.imagePriceBySize || {}).length > 0;
     const range = personal && priceNumber(quote.estimateLow) !== null && priceNumber(quote.estimateHigh) !== null;
     const exceedsHold = hasEstimate && hasPrecharge && Math.max(Number(quote.estimatedAmount), priceNumber(quote.estimateHigh) ?? 0) > Number(quote.prechargeAmount);
     return (
         <div className={cn("space-y-1.5", !compact && "text-sm")}>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 {hasEstimate ? <span className="font-medium text-foreground">{personal ? "历史参考" : quote.exact ? "当前参数价" : "本次估算"} {range ? `${formatPrice(quote.estimateLow, quote.currency)}–${formatPrice(quote.estimateHigh, quote.currency)}` : formatPrice(quote.estimatedAmount, quote.currency)}{quote.kind === "image" ? ` / ${count} 张` : duration ? ` / ${duration} 秒` : ""}</span>
-                    : <span>{unit === "/百万输出 Token" || quote.tokenPrices ? "按实际 Token 用量结算" : "当前参数暂无报价"}</span>}
+                    : <span>{autoImage ? "尺寸自动，按实际输出尺寸结算" : unit === "/百万输出 Token" || quote.tokenPrices ? "按实际 Token 用量结算" : "当前参数暂无报价"}</span>}
                 {hasPrecharge ? <span>预扣 <strong className="font-medium text-foreground">{formatPrice(quote.prechargeAmount, quote.currency)}</strong></span> : null}
             </div>
             {personal ? <p className="m-0 text-xs">参考本人近 90 天 {quote.estimateSamples} 次相同规格用量，按当前单价估算。</p> : quote.estimateSource === "default" ? <p className="m-0 text-xs">相同规格记录不足，采用模型默认预扣。</p> : null}
             {exceedsHold ? <p className="m-0 font-medium text-foreground">预计费用高于预扣，完成后将补扣差额。</p> : null}
             {hasUnit ? <div>{resolution ? <span className="mr-2 uppercase">{resolution}</span> : null}本站单价 <span className="font-medium text-foreground">{formatPrice(quote.siteUnitPrice, quote.currency)}{unit}</span>{priceNumber(quote.officialUnitPrice) !== null ? <span className="ml-2">官方 {formatPrice(quote.officialUnitPrice, quote.currency)}{unit}</span> : null}</div> : null}
+            {autoImage ? <div className="flex flex-wrap gap-x-3 gap-y-1">{Object.entries(quote.imagePriceBySize || {}).filter(([, price]) => priceNumber(price) !== null).map(([tier, price]) => <span key={tier}>{tier} {formatPrice(price, quote.currency)} / 张</span>)}</div> : null}
             {rate ? <div>{rate}</div> : null}
             {quote.surcharges?.map(charge => <div key={charge.code} className="text-xs">{charge.unit === "image" ? `参考图前 ${charge.freeUnits} 张免费，超出 ${formatPrice(charge.siteUnitPrice, quote.currency)} / 张` : charge.unit === "second" ? `参考视频 ${formatPrice(charge.siteUnitPrice, quote.currency)} / 秒` : null}</div>)}
             {priceNumber(quote.estimatedSurchargeAmount) !== null && Number(quote.estimatedSurchargeAmount) > 0 ? <p className="m-0 font-medium text-foreground">本次参考素材费用约 {formatPrice(quote.estimatedSurchargeAmount, quote.currency)}</p> : null}

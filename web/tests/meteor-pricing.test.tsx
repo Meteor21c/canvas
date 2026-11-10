@@ -35,6 +35,16 @@ test("unknown token cost never becomes a zero price or a per-image quote", () =>
     expect(html).not.toContain("预扣");
 });
 
+test("auto-sized GIF quotes list size tariffs without inventing an exact total", () => {
+    const quote: MeteorQuote = { available: true, kind: "image", model: "gpt-image-2.6", channelId: "test", billingMode: "image", currency: "USD", siteUnitPrice: null, officialUnitPrice: null, saleRateToOfficial: null, estimatedAmount: null, prechargeAmount: null, exact: false, notice: "尺寸自动，按实际输出尺寸计费。", imagePriceBySize: { "1K": "0.07", "2K": "0.10", "4K": "0.13" } };
+    const html = renderToStaticMarkup(<QuoteDetails quote={quote} resolution="auto" />);
+    expect(html).toContain("按实际输出尺寸结算");
+    for (const tier of ["1K", "2K", "4K"]) expect(html).toContain(tier);
+    expect(html).not.toContain("当前参数价");
+    expect(html).not.toContain("本次估算");
+    expect(pricingInputFromConfig({ ...defaultConfig, imageOutputFormat: "gif", imageResolution: "4k", size: "3840x2160", count: "4" }, "image")).toMatchObject({ count: 1, resolution: "auto", size: "auto" });
+});
+
 test("official-relative rate uses ratio semantics and current request parameters stay intact", () => {
     expect(formatOfficialRate("0.345")).toBe("0.345 × 官方价（3.45 折）");
     expect(formatOfficialRate(null)).toBe("");

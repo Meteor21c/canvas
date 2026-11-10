@@ -146,6 +146,10 @@ func TestMeteorImageTokenAndTierPricesRemainHonest(t *testing.T) {
 	if quote.ImagePriceBySize["1K"] == nil || *quote.ImagePriceBySize["1K"] != "0.12" {
 		t.Fatal("tier table missing", quote)
 	}
+	auto, err := MeteorMediaQuote(context.Background(), user, MeteorQuoteInput{Kind: "image", ChannelID: channel.ID, Model: "seedream-4", Count: 1, Resolution: "auto", Size: "auto"})
+	if err != nil || !auto.Available || auto.Exact || auto.EstimatedAmount != nil || auto.SiteUnitPrice != nil || len(auto.ImagePriceBySize) != 3 {
+		t.Fatal("automatic dimensions must keep tariffs without an exact total", auto, err)
+	}
 	if _, err := MeteorMediaQuote(context.Background(), user, MeteorQuoteInput{Kind: "image", ChannelID: channel.ID, Model: "seedream-4", Count: 5}); err == nil {
 		t.Fatal("five images permitted")
 	}
